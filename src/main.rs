@@ -35,6 +35,18 @@ async fn main() -> Result<(), AppError> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let config = Arc::new(Config::from_env());
+    let address: SocketAddr = format!("0.0.0.0:{}", config.port)
+        .parse::<SocketAddr>()
+        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+    let listener = tokio::net::TcpListener::bind(address)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+    info!(
+        "TCP listener bound on {}",
+        listener
+            .local_addr()
+            .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?
+    );
     let db = connect_db(&config).await;
     let state = Arc::new(AppState {
         db,
@@ -58,12 +70,6 @@ async fn main() -> Result<(), AppError> {
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());
-    let address: SocketAddr = format!("0.0.0.0:{}", config.port)
-        .parse::<SocketAddr>()
-        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
-    let listener = tokio::net::TcpListener::bind(address)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
     info!(
         "TEDxAchievers API listening on {}",
         listener
