@@ -1,0 +1,38 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VolunteerApplication {
+    #[serde(rename = "_id")]
+    pub id: String,
+    pub full_name: String,
+    pub email: String,
+    pub phone_number: String,
+    pub department: String,
+    pub matric_number: String,
+    pub preferred_role: PreferredRole,
+    pub motivation: String,
+    pub status: ApplicationStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PreferredRole {
+    LogisticsAndVenue,
+    FinanceAndSponsorship,
+    Welfare,
+    ProtocolAndUshering,
+    Technical,
+    Media,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationStatus {
+    Pending,
+    Approved,
+    Rejected,
+}

@@ -1,1 +1,0 @@
-﻿# TedX Achievers Website Backend
