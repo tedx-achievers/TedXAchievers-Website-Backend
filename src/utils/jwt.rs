@@ -48,20 +48,43 @@ pub fn sign_refresh_token(user_id: &str, config: &Config) -> Result<String, AppE
     .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))
 }
 pub fn verify_access_token(token: &str, config: &Config) -> Result<Claims, AppError> {
-    decode::<Claims>(
+    decode_with_rotation(
         token,
-        &DecodingKey::from_secret(config.jwt_access_secret.as_bytes()),
-        &Validation::default(),
+        &config.jwt_access_secret,
+        config.jwt_access_secret_previous.as_deref(),
     )
-    .map(|data| data.claims)
-    .map_err(|_| AppError::Unauthorized)
 }
 pub fn verify_refresh_token(token: &str, config: &Config) -> Result<RefreshClaims, AppError> {
-    decode::<RefreshClaims>(
+    decode_with_rotation(
         token,
-        &DecodingKey::from_secret(config.jwt_refresh_secret.as_bytes()),
-        &Validation::default(),
+        &config.jwt_refresh_secret,
+        config.jwt_refresh_secret_previous.as_deref(),
     )
-    .map(|data| data.claims)
-    .map_err(|_| AppError::Unauthorized)
+}
+
+fn decode_with_rotation<T: for<'de> Deserialize<'de>>(
+    token: &str,
+    current_secret: &str,
+    previous_secret: Option<&str>,
+) -> Result<T, AppError> {
+    let validation = Validation::default();
+    let current = decode::<T>(
+        token,
+        &DecodingKey::from_secret(current_secret.as_bytes()),
+        &validation,
+    );
+    if let Ok(data) = current {
+        return Ok(data.claims);
+    }
+    previous_secret
+        .and_then(|secret| {
+            decode::<T>(
+                token,
+                &DecodingKey::from_secret(secret.as_bytes()),
+                &validation,
+            )
+            .ok()
+        })
+        .map(|data| data.claims)
+        .ok_or(AppError::Unauthorized)
 }

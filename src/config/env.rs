@@ -5,7 +5,9 @@ pub struct Config {
     pub port: u16,
     pub mongodb_uri: String,
     pub jwt_access_secret: String,
+    pub jwt_access_secret_previous: Option<String>,
     pub jwt_refresh_secret: String,
+    pub jwt_refresh_secret_previous: Option<String>,
     pub jwt_access_expires_secs: u64,
     pub jwt_refresh_expires_secs: u64,
     pub frontend_url: String,
@@ -31,14 +33,25 @@ impl Config {
                 .parse()
                 .unwrap_or_else(|error| panic!("Invalid {name}: {error}"))
         }
+        fn optional(name: &str) -> Option<String> {
+            env::var(name).ok().filter(|value| !value.trim().is_empty())
+        }
+        let frontend_url = required("FRONTEND_URL");
+        let is_local = frontend_url.starts_with("http://localhost")
+            || frontend_url.starts_with("http://127.0.0.1");
+        if (!frontend_url.starts_with("https://") && !is_local) || frontend_url.ends_with('/') {
+            panic!("FRONTEND_URL must be an HTTPS origin without a trailing slash");
+        }
         Self {
             port: parsed("PORT"),
             mongodb_uri: required("MONGODB_URI"),
             jwt_access_secret: required("JWT_ACCESS_SECRET"),
+            jwt_access_secret_previous: optional("JWT_ACCESS_SECRET_PREVIOUS"),
             jwt_refresh_secret: required("JWT_REFRESH_SECRET"),
+            jwt_refresh_secret_previous: optional("JWT_REFRESH_SECRET_PREVIOUS"),
             jwt_access_expires_secs: parsed("JWT_ACCESS_EXPIRES_SECS"),
             jwt_refresh_expires_secs: parsed("JWT_REFRESH_EXPIRES_SECS"),
-            frontend_url: required("FRONTEND_URL"),
+            frontend_url,
             brevo_api_key: required("BREVO_API_KEY"),
             brevo_sender_email: required("BREVO_SENDER_EMAIL"),
             brevo_sender_name: required("BREVO_SENDER_NAME"),

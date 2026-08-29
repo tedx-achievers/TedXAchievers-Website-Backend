@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub struct VolunteerApplication {
     #[serde(rename = "_id")]
     pub id: String,
+    #[serde(default)]
+    pub reference_code: String,
     pub full_name: String,
     pub email: String,
     pub phone_number: String,

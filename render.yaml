@@ -14,7 +14,11 @@ services:
         sync: false
       - key: JWT_ACCESS_SECRET
         sync: false
+      - key: JWT_ACCESS_SECRET_PREVIOUS
+        sync: false
       - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET_PREVIOUS
         sync: false
       - key: JWT_ACCESS_EXPIRES_SECS
         value: "900"

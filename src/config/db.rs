@@ -19,6 +19,29 @@ pub async fn connect_db(config: &Config) -> Database {
             .options(IndexOptions::builder().unique(true).build())
             .build()
     };
+    let unique_named = |field: &str, name: &str| {
+        IndexModel::builder()
+            .keys(doc! { field: 1 })
+            .options(
+                IndexOptions::builder()
+                    .name(name.to_owned())
+                    .unique(true)
+                    .build(),
+            )
+            .build()
+    };
+    let unique_sparse_named = |field: &str, name: &str| {
+        IndexModel::builder()
+            .keys(doc! { field: 1 })
+            .options(
+                IndexOptions::builder()
+                    .name(name.to_owned())
+                    .unique(true)
+                    .sparse(true)
+                    .build(),
+            )
+            .build()
+    };
     let normal = |field: &str| IndexModel::builder().keys(doc! { field: 1 }).build();
     let sparse = |field: &str| {
         IndexModel::builder()
@@ -56,15 +79,53 @@ pub async fn connect_db(config: &Config) -> Database {
         ),
         (
             "volunteer_applications",
-            vec![normal("email"), normal("status")],
+            vec![
+                unique_named("email", "volunteer_email_unique"),
+                unique_sparse_named("reference_code", "volunteer_reference_unique"),
+                normal("department"),
+                normal("status"),
+            ],
         ),
     ];
     for (collection, models) in indexes {
-        database
-            .collection::<mongodb::bson::Document>(collection)
+        let collection_handle = database.collection::<mongodb::bson::Document>(collection);
+        if collection == "volunteer_applications" {
+            // Older deployments created a non-unique email_1 index. Remove it
+            // so the unique replacement below can be created on startup.
+            let _ = collection_handle.drop_index("email_1", None).await;
+        }
+        collection_handle
             .create_indexes(models, None)
             .await
             .unwrap_or_else(|error| panic!("Failed to create indexes for {collection}: {error}"));
+    }
+    let applications = database.collection::<mongodb::bson::Document>("volunteer_applications");
+    let counters = database.collection::<mongodb::bson::Document>("volunteer_department_counters");
+    let departments = applications
+        .distinct("department", None, None)
+        .await
+        .unwrap_or_else(|error| panic!("Failed to read volunteer departments: {error}"));
+    for department in departments {
+        if let mongodb::bson::Bson::String(department) = department {
+            let count = applications
+                .count_documents(doc! { "department": &department }, None)
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("Failed to count volunteer applications for {department}: {error}")
+                });
+            counters
+                .update_one(
+                    doc! { "_id": &department },
+                    doc! { "$set": { "count": count as i64 } },
+                    mongodb::options::UpdateOptions::builder()
+                        .upsert(true)
+                        .build(),
+                )
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("Failed to synchronize volunteer department counter for {department}: {error}")
+                });
+        }
     }
     info!("MongoDB connected and indexes created");
     database

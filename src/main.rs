@@ -6,7 +6,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use std::{net::SocketAddr, sync::Arc};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing::info;
 mod config;
 mod errors;
@@ -20,6 +20,8 @@ use errors::AppError;
 pub struct AppState {
     pub db: mongodb::Database,
     pub cache: Arc<DashMap<String, serde_json::Value>>,
+    pub rate_limits: Arc<DashMap<String, std::collections::VecDeque<std::time::Instant>>>,
+    pub email_queue: tokio::sync::mpsc::Sender<utils::email::EmailJob>,
     pub config: Arc<Config>,
 }
 async fn not_found() -> impl IntoResponse {
@@ -48,18 +50,22 @@ async fn main() -> Result<(), AppError> {
             .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?
     );
     let db = connect_db(&config).await;
+    let email_queue = utils::email::start_worker(Arc::clone(&config));
     let state = Arc::new(AppState {
         db,
         cache: Arc::new(DashMap::new()),
+        rate_limits: Arc::new(DashMap::new()),
+        email_queue,
         config: Arc::clone(&config),
     });
     let origin = HeaderValue::from_str(&config.frontend_url)
         .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
     let cors = CorsLayer::new()
         .allow_origin(origin)
-        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH])
         .allow_headers([CONTENT_TYPE])
         .allow_credentials(true);
+    let middleware_state = Arc::clone(&state);
     let app = Router::new()
         .route("/api/health", get(modules::health::handler::health_handler))
         .nest("/api/auth", modules::auth::router())
@@ -69,6 +75,11 @@ async fn main() -> Result<(), AppError> {
         .fallback(not_found)
         .with_state(state)
         .layer(cors)
+        .layer(RequestBodyLimitLayer::new(32 * 1024))
+        .layer(axum::middleware::from_fn_with_state(
+            middleware_state,
+            middleware::rate_limit::request_rate_limit,
+        ))
         .layer(TraceLayer::new_for_http());
     info!(
         "TEDxAchievers API listening on {}",

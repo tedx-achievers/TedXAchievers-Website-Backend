@@ -1,7 +1,7 @@
 use chrono::Utc;
 use mongodb::{
     bson::doc,
-    options::{FindOneOptions, FindOptions},
+    options::{FindOneAndUpdateOptions, FindOneOptions, FindOptions, ReturnDocument},
     Database,
 };
 use tracing::{error, info};
@@ -14,6 +14,8 @@ use crate::{
 };
 
 const COLLECTION: &str = "volunteer_applications";
+const DEPARTMENT_COUNTERS: &str = "volunteer_department_counters";
+const DEPARTMENT_CAP: u64 = 10;
 
 fn status_value(status: &ApplicationStatus) -> &'static str {
     match status {
@@ -29,8 +31,10 @@ fn application_from_dto(
     now: chrono::DateTime<Utc>,
     id: String,
 ) -> VolunteerApplication {
+    let reference_code = format!("TEDX-{}", &id.replace('-', "")[..8].to_uppercase());
     VolunteerApplication {
         id,
+        reference_code,
         full_name: dto.full_name.trim().to_owned(),
         email: dto.email.trim().to_lowercase(),
         phone_number: dto.phone_number.trim().to_owned(),
@@ -48,68 +52,91 @@ pub async fn apply(
     db: &Database,
     dto: ApplyVolunteerDto,
 ) -> Result<VolunteerApplication, AppError> {
-    let email = dto.email.trim().to_lowercase();
     let collection = db.collection::<VolunteerApplication>(COLLECTION);
-    if collection
-        .find_one(
-            doc! { "email": &email, "status": { "$in": ["pending", "approved"] } },
-            None,
-        )
-        .await
-        .map_err(|error| {
-            error!(%error, "Failed to check active volunteer application");
-            AppError::Internal(anyhow::anyhow!(error))
-        })?
-        .is_some()
-    {
-        return Err(AppError::Conflict(
-            "An active application already exists for this email".to_owned(),
-        ));
-    }
     let now = Utc::now();
-    if let Some(existing) = collection
-        .find_one(
-            doc! { "email": &email, "status": "rejected" },
-            Some(
-                FindOneOptions::builder()
-                    .sort(doc! { "created_at": -1 })
-                    .build(),
-            ),
-        )
-        .await
-        .map_err(|error| {
-            error!(%error, "Failed to find rejected volunteer application");
-            AppError::Internal(anyhow::anyhow!(error))
-        })?
-    {
-        let mut replacement =
-            application_from_dto(dto, ApplicationStatus::Pending, now, existing.id);
-        replacement.created_at = existing.created_at;
-        collection
-            .replace_one(doc! { "_id": &replacement.id }, &replacement, None)
-            .await
-            .map_err(|error| {
-                error!(%error, "Failed to update rejected volunteer application");
-                AppError::Internal(anyhow::anyhow!(error))
-            })?;
-        info!(application_id = %replacement.id, "Volunteer application resubmitted");
-        return Ok(replacement);
-    }
     let application = application_from_dto(
         dto,
         ApplicationStatus::Pending,
         now,
         Uuid::new_v4().to_string(),
     );
-    collection
-        .insert_one(&application, None)
-        .await
-        .map_err(|error| {
-            error!(%error, "Failed to insert volunteer application");
-            AppError::Internal(anyhow::anyhow!(error))
-        })?;
+    let department = application.department.clone();
+    if !claim_department_slot(db, &department).await? {
+        return Err(AppError::Conflict(
+            "This volunteer department has reached its application limit".to_owned(),
+        ));
+    }
+    if let Err(error) = collection.insert_one(&application, None).await {
+        release_department_slot(db, &department).await;
+        if error.to_string().contains("E11000") {
+            return Err(AppError::Conflict(
+                "An application already exists for this email".to_owned(),
+            ));
+        }
+        error!(%error, "Failed to insert volunteer application");
+        return Err(AppError::Internal(anyhow::anyhow!(error)));
+    }
     info!(application_id = %application.id, "Volunteer application created");
     Ok(application)
+}
+
+async fn claim_department_slot(db: &Database, department: &str) -> Result<bool, AppError> {
+    let applications = db.collection::<VolunteerApplication>(COLLECTION);
+    let existing_count = applications
+        .count_documents(doc! { "department": department }, None)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+    if existing_count >= DEPARTMENT_CAP {
+        return Ok(false);
+    }
+    let counters = db.collection::<mongodb::bson::Document>(DEPARTMENT_COUNTERS);
+    let options = FindOneAndUpdateOptions::builder()
+        .upsert(true)
+        .return_document(ReturnDocument::After)
+        .build();
+    let result = counters
+        .find_one_and_update(
+            doc! { "_id": department, "count": { "$lt": DEPARTMENT_CAP as i64 } },
+            doc! { "$inc": { "count": 1_i64 } },
+            options,
+        )
+        .await;
+    match result {
+        Ok(Some(_)) => Ok(true),
+        Ok(None) => Ok(false),
+        Err(error) if error.to_string().contains("E11000") => {
+            let retry_options = FindOneAndUpdateOptions::builder()
+                .return_document(ReturnDocument::After)
+                .build();
+            counters
+                .find_one_and_update(
+                    doc! { "_id": department, "count": { "$lt": DEPARTMENT_CAP as i64 } },
+                    doc! { "$inc": { "count": 1_i64 } },
+                    retry_options,
+                )
+                .await
+                .map(|result| result.is_some())
+                .map_err(|retry_error| AppError::Internal(anyhow::anyhow!(retry_error)))
+        }
+        Err(error) => {
+            error!(%error, department, "Failed to claim volunteer department slot");
+            Err(AppError::Internal(anyhow::anyhow!(error)))
+        }
+    }
+}
+
+async fn release_department_slot(db: &Database, department: &str) {
+    if let Err(error) = db
+        .collection::<mongodb::bson::Document>(DEPARTMENT_COUNTERS)
+        .update_one(
+            doc! { "_id": department, "count": { "$gt": 0 } },
+            doc! { "$inc": { "count": -1_i64 } },
+            None,
+        )
+        .await
+    {
+        error!(%error, "Failed to release volunteer department slot");
+    }
 }
 
 pub async fn get_my_status(db: &Database, email: &str) -> Result<VolunteerApplication, AppError> {

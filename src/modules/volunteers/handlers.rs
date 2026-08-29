@@ -34,6 +34,36 @@ pub async fn apply_handler(
         return Ok(validation_response(error));
     }
     let application = service::apply(&state.db, body).await?;
+    let preferred_role = match &application.preferred_role {
+        crate::models::volunteer_application::PreferredRole::LogisticsAndVenue => {
+            "Logistics and Venue"
+        }
+        crate::models::volunteer_application::PreferredRole::FinanceAndSponsorship => {
+            "Finance and Sponsorship"
+        }
+        crate::models::volunteer_application::PreferredRole::Welfare => "Welfare",
+        crate::models::volunteer_application::PreferredRole::ProtocolAndUshering => {
+            "Protocol and Ushering"
+        }
+        crate::models::volunteer_application::PreferredRole::Technical => "Technical",
+        crate::models::volunteer_application::PreferredRole::Media => "Media",
+    };
+    crate::utils::email::enqueue(
+        &state.email_queue,
+        crate::utils::email::EmailJob {
+            to_email: application.email.clone(),
+            to_name: application.full_name.clone(),
+            subject: "Your TEDxAchievers volunteer application is in".to_owned(),
+            html: crate::utils::email::volunteer_application_received_html(
+                &application.full_name,
+                &state.config.frontend_url,
+                &application.reference_code,
+                preferred_role,
+                &application.department,
+                &application.created_at.format("%B %d, %Y").to_string(),
+            ),
+        },
+    );
     Ok((StatusCode::CREATED, Json(application)).into_response())
 }
 
