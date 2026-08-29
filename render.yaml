@@ -26,6 +26,8 @@ services:
         value: "2592000"
       - key: FRONTEND_URL
         sync: false
+      - key: FRONTEND_URL_2
+        sync: false
       - key: BREVO_API_KEY
         sync: false
       - key: BREVO_SENDER_EMAIL

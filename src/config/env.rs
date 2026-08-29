@@ -11,6 +11,7 @@ pub struct Config {
     pub jwt_access_expires_secs: u64,
     pub jwt_refresh_expires_secs: u64,
     pub frontend_url: String,
+    pub frontend_url_2: Option<String>,
     pub brevo_api_key: String,
     pub brevo_sender_email: String,
     pub brevo_sender_name: String,
@@ -42,6 +43,14 @@ impl Config {
         if (!frontend_url.starts_with("https://") && !is_local) || frontend_url.ends_with('/') {
             panic!("FRONTEND_URL must be an HTTPS origin without a trailing slash");
         }
+        let frontend_url_2 = optional("FRONTEND_URL_2");
+        if let Some(origin) = &frontend_url_2 {
+            let is_local =
+                origin.starts_with("http://localhost") || origin.starts_with("http://127.0.0.1");
+            if (!origin.starts_with("https://") && !is_local) || origin.ends_with('/') {
+                panic!("FRONTEND_URL_2 must be an HTTPS origin without a trailing slash");
+            }
+        }
         Self {
             port: parsed("PORT"),
             mongodb_uri: required("MONGODB_URI"),
@@ -52,6 +61,7 @@ impl Config {
             jwt_access_expires_secs: parsed("JWT_ACCESS_EXPIRES_SECS"),
             jwt_refresh_expires_secs: parsed("JWT_REFRESH_EXPIRES_SECS"),
             frontend_url,
+            frontend_url_2,
             brevo_api_key: required("BREVO_API_KEY"),
             brevo_sender_email: required("BREVO_SENDER_EMAIL"),
             brevo_sender_name: required("BREVO_SENDER_NAME"),

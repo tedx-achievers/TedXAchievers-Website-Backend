@@ -38,6 +38,7 @@ pub fn volunteer_application_received_html(
     let safe_department = escape_html(department);
     let safe_submitted_at = escape_html(submitted_at);
     let site_url = site_url.trim_end_matches('/');
+    let logo_url = format!("{site_url}/logo-white.png");
     let hero_url = format!("{site_url}/AUO_TEDxHS.png");
     let volunteer_url = format!("{site_url}/volunteers");
     format!(
@@ -50,9 +51,9 @@ pub fn volunteer_application_received_html(
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:620px;background-color:#0f0f0f;border-radius:18px 18px 0 0;overflow:hidden;">
         <tr><td style="height:5px;background-color:#e62b1e;font-size:0;line-height:0;">&nbsp;</td></tr>
         <tr><td align="center" style="padding:28px 32px 20px;background-color:#0f0f0f;">
-          <div style="color:#e62b1e;font-family:Arial,Helvetica,sans-serif;font-size:46px;line-height:46px;letter-spacing:-3px;font-weight:900;">TEDX</div>
+          <img src="{logo_url}" width="420" alt="TEDx Achievers" style="display:block;width:100%;max-width:420px;height:auto;border:0;">
         </td></tr>
-        <tr><td style="padding:0 32px 28px;"><img src="{hero_url}" width="556" alt="Achievers University campus" style="display:block;width:100%;max-width:556px;height:auto;border:0;border-radius:12px;"></td></tr>
+        <tr><td style="padding:0 0 28px;"><img src="{hero_url}" width="620" alt="Achievers University campus" style="display:block;width:100%;max-width:620px;height:auto;border:0;border-radius:0;"></td></tr>
         <tr><td style="padding:0 32px 34px;">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
             <tr><td style="padding:0 0 0;">
@@ -67,7 +68,7 @@ pub fn volunteer_application_received_html(
                 <tr><td style="padding:6px 18px;color:#777777;font-size:13px;line-height:22px;">Department</td><td style="padding:6px 18px;color:#f0f0f0;font-size:13px;line-height:22px;">{safe_department}</td></tr>
                 <tr><td style="padding:6px 18px 16px;color:#777777;font-size:13px;line-height:22px;">Submitted</td><td style="padding:6px 18px 16px;color:#f0f0f0;font-size:13px;line-height:22px;">{safe_submitted_at}</td></tr>
               </table>
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:26px;">
+              <table role="presentation" align="center" cellspacing="0" cellpadding="0" border="0" style="margin-top:26px;">
                 <tr><td align="center" style="border-radius:999px;background-color:#e62b1e;">
                   <a href="{volunteer_url}" style="display:inline-block;padding:14px 24px;border-radius:999px;color:#ffffff;font-size:14px;font-weight:bold;letter-spacing:.4px;text-decoration:none;">Visit the volunteer page</a>
                 </td></tr>

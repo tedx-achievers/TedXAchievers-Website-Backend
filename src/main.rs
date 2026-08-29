@@ -6,7 +6,11 @@ use axum::{
 };
 use dashmap::DashMap;
 use std::{net::SocketAddr, sync::Arc};
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    limit::RequestBodyLimitLayer,
+    trace::TraceLayer,
+};
 use tracing::info;
 mod config;
 mod errors;
@@ -60,8 +64,15 @@ async fn main() -> Result<(), AppError> {
     });
     let origin = HeaderValue::from_str(&config.frontend_url)
         .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+    let mut allowed_origins = vec![origin];
+    if let Some(origin) = &config.frontend_url_2 {
+        allowed_origins.push(
+            HeaderValue::from_str(origin)
+                .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?,
+        );
+    }
     let cors = CorsLayer::new()
-        .allow_origin(origin)
+        .allow_origin(AllowOrigin::list(allowed_origins))
         .allow_methods([Method::GET, Method::POST, Method::PATCH])
         .allow_headers([CONTENT_TYPE])
         .allow_credentials(true);
