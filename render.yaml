@@ -9,7 +9,7 @@ services:
       - key: RUST_LOG
         value: info
       - key: PORT
-        value: "5000"
+        value: "10000"
       - key: MONGODB_URI
         sync: false
       - key: JWT_ACCESS_SECRET
