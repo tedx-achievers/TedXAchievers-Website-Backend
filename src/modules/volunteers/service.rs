@@ -10,18 +10,31 @@ use uuid::Uuid;
 use super::dto::{ApplyVolunteerDto, UpdateApplicationStatusDto};
 use crate::{
     errors::AppError,
-    models::volunteer_application::{ApplicationStatus, VolunteerApplication},
+    models::volunteer_application::{ApplicationStatus, PreferredRole, VolunteerApplication},
 };
 
 const COLLECTION: &str = "volunteer_applications";
-const DEPARTMENT_COUNTERS: &str = "volunteer_department_counters";
-const DEPARTMENT_CAP: u64 = 10;
+const ROLE_COUNTERS: &str = "volunteer_role_counters";
+const ROLE_CAP: u64 = 10;
 
 fn status_value(status: &ApplicationStatus) -> &'static str {
     match status {
         ApplicationStatus::Pending => "pending",
         ApplicationStatus::Approved => "approved",
         ApplicationStatus::Rejected => "rejected",
+    }
+}
+
+fn preferred_role_value(role: &PreferredRole) -> &'static str {
+    match role {
+        PreferredRole::Technical => "technical",
+        PreferredRole::Videography => "videography",
+        PreferredRole::Photography => "photography",
+        PreferredRole::Content => "content",
+        PreferredRole::ProtocolAndUshering => "protocol_and_ushering",
+        PreferredRole::Welfare => "welfare",
+        PreferredRole::GraphicAndDesign => "graphic_and_design",
+        PreferredRole::VenueAndDecoration => "venue_and_decoration",
     }
 }
 
@@ -60,14 +73,14 @@ pub async fn apply(
         now,
         Uuid::new_v4().to_string(),
     );
-    let department = application.department.clone();
-    if !claim_department_slot(db, &department).await? {
+    let preferred_role = preferred_role_value(&application.preferred_role);
+    if !claim_role_slot(db, preferred_role).await? {
         return Err(AppError::Conflict(
-            "This volunteer department has reached its application limit".to_owned(),
+            "This preferred role has reached its application limit".to_owned(),
         ));
     }
     if let Err(error) = collection.insert_one(&application, None).await {
-        release_department_slot(db, &department).await;
+        release_role_slot(db, preferred_role).await;
         if error.to_string().contains("E11000") {
             return Err(AppError::Conflict(
                 "An application already exists for this email".to_owned(),
@@ -80,23 +93,23 @@ pub async fn apply(
     Ok(application)
 }
 
-async fn claim_department_slot(db: &Database, department: &str) -> Result<bool, AppError> {
+async fn claim_role_slot(db: &Database, preferred_role: &str) -> Result<bool, AppError> {
     let applications = db.collection::<VolunteerApplication>(COLLECTION);
     let existing_count = applications
-        .count_documents(doc! { "department": department }, None)
+        .count_documents(doc! { "preferred_role": preferred_role }, None)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
-    if existing_count >= DEPARTMENT_CAP {
+    if existing_count >= ROLE_CAP {
         return Ok(false);
     }
-    let counters = db.collection::<mongodb::bson::Document>(DEPARTMENT_COUNTERS);
+    let counters = db.collection::<mongodb::bson::Document>(ROLE_COUNTERS);
     let options = FindOneAndUpdateOptions::builder()
         .upsert(true)
         .return_document(ReturnDocument::After)
         .build();
     let result = counters
         .find_one_and_update(
-            doc! { "_id": department, "count": { "$lt": DEPARTMENT_CAP as i64 } },
+            doc! { "_id": preferred_role, "count": { "$lt": ROLE_CAP as i64 } },
             doc! { "$inc": { "count": 1_i64 } },
             options,
         )
@@ -110,7 +123,7 @@ async fn claim_department_slot(db: &Database, department: &str) -> Result<bool, 
                 .build();
             counters
                 .find_one_and_update(
-                    doc! { "_id": department, "count": { "$lt": DEPARTMENT_CAP as i64 } },
+                    doc! { "_id": preferred_role, "count": { "$lt": ROLE_CAP as i64 } },
                     doc! { "$inc": { "count": 1_i64 } },
                     retry_options,
                 )
@@ -119,17 +132,17 @@ async fn claim_department_slot(db: &Database, department: &str) -> Result<bool, 
                 .map_err(|retry_error| AppError::Internal(anyhow::anyhow!(retry_error)))
         }
         Err(error) => {
-            error!(%error, department, "Failed to claim volunteer department slot");
+            error!(%error, preferred_role, "Failed to claim volunteer role slot");
             Err(AppError::Internal(anyhow::anyhow!(error)))
         }
     }
 }
 
-async fn release_department_slot(db: &Database, department: &str) {
+async fn release_role_slot(db: &Database, preferred_role: &str) {
     if let Err(error) = db
-        .collection::<mongodb::bson::Document>(DEPARTMENT_COUNTERS)
+        .collection::<mongodb::bson::Document>(ROLE_COUNTERS)
         .update_one(
-            doc! { "_id": department, "count": { "$gt": 0 } },
+            doc! { "_id": preferred_role, "count": { "$gt": 0 } },
             doc! { "$inc": { "count": -1_i64 } },
             None,
         )

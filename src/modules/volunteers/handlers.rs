@@ -1,7 +1,6 @@
 use super::{
     dto::{
-        canonical_department, ApplyVolunteerDto, CheckStatusDto, UpdateApplicationStatusDto,
-        DEPARTMENTS,
+        ApplyVolunteerDto, CheckStatusDto, UpdateApplicationStatusDto,
     },
     service,
 };
@@ -30,17 +29,7 @@ pub async fn apply_handler(
     body.full_name = body.full_name.trim().to_owned();
     body.email = body.email.trim().to_lowercase();
     body.phone_number = body.phone_number.trim().to_owned();
-    let Some(department) = canonical_department(&body.department) else {
-        return Ok((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(serde_json::json!({
-                "success": false,
-                "message": format!("Department must be one of: {}", DEPARTMENTS.join(", "))
-            })),
-        )
-            .into_response());
-    };
-    body.department = department.to_owned();
+    body.department = body.department.trim().to_owned();
     body.matric_number = body.matric_number.trim().to_owned();
     body.motivation = body.motivation.trim().to_owned();
     if let Err(error) = body.validate() {
@@ -48,18 +37,20 @@ pub async fn apply_handler(
     }
     let application = service::apply(&state.db, body).await?;
     let preferred_role = match &application.preferred_role {
-        crate::models::volunteer_application::PreferredRole::LogisticsAndVenue => {
-            "Logistics and Venue"
-        }
-        crate::models::volunteer_application::PreferredRole::FinanceAndSponsorship => {
-            "Finance and Sponsorship"
-        }
-        crate::models::volunteer_application::PreferredRole::Welfare => "Welfare",
+        crate::models::volunteer_application::PreferredRole::Technical => "Technical",
+        crate::models::volunteer_application::PreferredRole::Videography => "Videography",
+        crate::models::volunteer_application::PreferredRole::Photography => "Photography",
+        crate::models::volunteer_application::PreferredRole::Content => "Content",
         crate::models::volunteer_application::PreferredRole::ProtocolAndUshering => {
             "Protocol and Ushering"
         }
-        crate::models::volunteer_application::PreferredRole::Technical => "Technical",
-        crate::models::volunteer_application::PreferredRole::Media => "Media",
+        crate::models::volunteer_application::PreferredRole::Welfare => "Welfare",
+        crate::models::volunteer_application::PreferredRole::GraphicAndDesign => {
+            "Graphic and Design"
+        }
+        crate::models::volunteer_application::PreferredRole::VenueAndDecoration => {
+            "Venue and Decoration"
+        }
     };
     crate::utils::email::enqueue(
         &state.email_queue,

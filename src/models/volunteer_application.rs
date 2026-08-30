@@ -23,12 +23,14 @@ pub struct VolunteerApplication {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PreferredRole {
-    LogisticsAndVenue,
-    FinanceAndSponsorship,
-    Welfare,
-    ProtocolAndUshering,
     Technical,
-    Media,
+    Videography,
+    Photography,
+    Content,
+    ProtocolAndUshering,
+    Welfare,
+    GraphicAndDesign,
+    VenueAndDecoration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

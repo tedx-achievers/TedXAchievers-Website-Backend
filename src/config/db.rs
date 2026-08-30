@@ -83,6 +83,7 @@ pub async fn connect_db(config: &Config) -> Database {
                 unique_named("email", "volunteer_email_unique"),
                 unique_sparse_named("reference_code", "volunteer_reference_unique"),
                 normal("department"),
+                normal("preferred_role"),
                 normal("status"),
             ],
         ),
@@ -100,22 +101,22 @@ pub async fn connect_db(config: &Config) -> Database {
             .unwrap_or_else(|error| panic!("Failed to create indexes for {collection}: {error}"));
     }
     let applications = database.collection::<mongodb::bson::Document>("volunteer_applications");
-    let counters = database.collection::<mongodb::bson::Document>("volunteer_department_counters");
-    let departments = applications
-        .distinct("department", None, None)
+    let counters = database.collection::<mongodb::bson::Document>("volunteer_role_counters");
+    let preferred_roles = applications
+        .distinct("preferred_role", None, None)
         .await
-        .unwrap_or_else(|error| panic!("Failed to read volunteer departments: {error}"));
-    for department in departments {
-        if let mongodb::bson::Bson::String(department) = department {
+        .unwrap_or_else(|error| panic!("Failed to read volunteer preferred roles: {error}"));
+    for preferred_role in preferred_roles {
+        if let mongodb::bson::Bson::String(preferred_role) = preferred_role {
             let count = applications
-                .count_documents(doc! { "department": &department }, None)
+                .count_documents(doc! { "preferred_role": &preferred_role }, None)
                 .await
                 .unwrap_or_else(|error| {
-                    panic!("Failed to count volunteer applications for {department}: {error}")
+                    panic!("Failed to count volunteer applications for {preferred_role}: {error}")
                 });
             counters
                 .update_one(
-                    doc! { "_id": &department },
+                    doc! { "_id": &preferred_role },
                     doc! { "$set": { "count": count as i64 } },
                     mongodb::options::UpdateOptions::builder()
                         .upsert(true)
@@ -123,7 +124,7 @@ pub async fn connect_db(config: &Config) -> Database {
                 )
                 .await
                 .unwrap_or_else(|error| {
-                    panic!("Failed to synchronize volunteer department counter for {department}: {error}")
+                    panic!("Failed to synchronize volunteer role counter for {preferred_role}: {error}")
                 });
         }
     }
