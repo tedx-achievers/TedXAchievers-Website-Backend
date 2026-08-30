@@ -25,9 +25,7 @@ services:
       - key: JWT_REFRESH_EXPIRES_SECS
         value: "2592000"
       - key: FRONTEND_URL
-        sync: false
-      - key: FRONTEND_URL_2
-        sync: false
+        value: https://www.tedxachieversuniversity.com.ng,https://tedxachieversuniversity.com.ng
       - key: BREVO_API_KEY
         sync: false
       - key: BREVO_SENDER_EMAIL

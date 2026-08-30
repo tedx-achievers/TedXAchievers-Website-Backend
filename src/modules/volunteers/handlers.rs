@@ -1,5 +1,8 @@
 use super::{
-    dto::{ApplyVolunteerDto, CheckStatusDto, UpdateApplicationStatusDto},
+    dto::{
+        canonical_department, ApplyVolunteerDto, CheckStatusDto, UpdateApplicationStatusDto,
+        DEPARTMENTS,
+    },
     service,
 };
 use crate::{errors::AppError, middleware::role::RequireAdmin, AppState};
@@ -27,7 +30,17 @@ pub async fn apply_handler(
     body.full_name = body.full_name.trim().to_owned();
     body.email = body.email.trim().to_lowercase();
     body.phone_number = body.phone_number.trim().to_owned();
-    body.department = body.department.trim().to_owned();
+    let Some(department) = canonical_department(&body.department) else {
+        return Ok((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "success": false,
+                "message": format!("Department must be one of: {}", DEPARTMENTS.join(", "))
+            })),
+        )
+            .into_response());
+    };
+    body.department = department.to_owned();
     body.matric_number = body.matric_number.trim().to_owned();
     body.motivation = body.motivation.trim().to_owned();
     if let Err(error) = body.validate() {

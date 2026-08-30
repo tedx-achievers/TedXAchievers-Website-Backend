@@ -11,7 +11,7 @@ pub struct Config {
     pub jwt_access_expires_secs: u64,
     pub jwt_refresh_expires_secs: u64,
     pub frontend_url: String,
-    pub frontend_url_2: Option<String>,
+    pub frontend_urls: Vec<String>,
     pub brevo_api_key: String,
     pub brevo_sender_email: String,
     pub brevo_sender_name: String,
@@ -37,18 +37,20 @@ impl Config {
         fn optional(name: &str) -> Option<String> {
             env::var(name).ok().filter(|value| !value.trim().is_empty())
         }
-        let frontend_url = required("FRONTEND_URL");
-        let is_local = frontend_url.starts_with("http://localhost")
-            || frontend_url.starts_with("http://127.0.0.1");
-        if (!frontend_url.starts_with("https://") && !is_local) || frontend_url.ends_with('/') {
-            panic!("FRONTEND_URL must be an HTTPS origin without a trailing slash");
+        let frontend_urls = required("FRONTEND_URL")
+            .split(',')
+            .map(str::trim)
+            .filter(|origin| !origin.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        if frontend_urls.is_empty() {
+            panic!("FRONTEND_URL must contain at least one origin");
         }
-        let frontend_url_2 = optional("FRONTEND_URL_2");
-        if let Some(origin) = &frontend_url_2 {
+        for origin in &frontend_urls {
             let is_local =
                 origin.starts_with("http://localhost") || origin.starts_with("http://127.0.0.1");
             if (!origin.starts_with("https://") && !is_local) || origin.ends_with('/') {
-                panic!("FRONTEND_URL_2 must be an HTTPS origin without a trailing slash");
+                panic!("Every FRONTEND_URL origin must be HTTPS without a trailing slash");
             }
         }
         Self {
@@ -60,8 +62,8 @@ impl Config {
             jwt_refresh_secret_previous: optional("JWT_REFRESH_SECRET_PREVIOUS"),
             jwt_access_expires_secs: parsed("JWT_ACCESS_EXPIRES_SECS"),
             jwt_refresh_expires_secs: parsed("JWT_REFRESH_EXPIRES_SECS"),
-            frontend_url,
-            frontend_url_2,
+            frontend_url: frontend_urls[0].clone(),
+            frontend_urls,
             brevo_api_key: required("BREVO_API_KEY"),
             brevo_sender_email: required("BREVO_SENDER_EMAIL"),
             brevo_sender_name: required("BREVO_SENDER_NAME"),

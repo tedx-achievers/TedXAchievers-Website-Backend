@@ -62,15 +62,14 @@ async fn main() -> Result<(), AppError> {
         email_queue,
         config: Arc::clone(&config),
     });
-    let origin = HeaderValue::from_str(&config.frontend_url)
-        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
-    let mut allowed_origins = vec![origin];
-    if let Some(origin) = &config.frontend_url_2 {
-        allowed_origins.push(
+    let allowed_origins = config
+        .frontend_urls
+        .iter()
+        .map(|origin| {
             HeaderValue::from_str(origin)
-                .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?,
-        );
-    }
+                .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::list(allowed_origins))
         .allow_methods([Method::GET, Method::POST, Method::PATCH])

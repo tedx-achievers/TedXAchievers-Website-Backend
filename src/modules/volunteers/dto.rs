@@ -3,6 +3,24 @@ use validator::Validate;
 
 use crate::models::volunteer_application::{ApplicationStatus, PreferredRole};
 
+pub const DEPARTMENTS: [&str; 8] = [
+    "technical",
+    "videography",
+    "photography",
+    "content",
+    "protocol_and_ushering",
+    "welfare",
+    "graphic_and_design",
+    "venue_and_decoration",
+];
+
+pub fn canonical_department(value: &str) -> Option<&'static str> {
+    DEPARTMENTS
+        .iter()
+        .copied()
+        .find(|department| department.eq_ignore_ascii_case(value.trim()))
+}
+
 #[derive(Debug, Deserialize, Serialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplyVolunteerDto {
