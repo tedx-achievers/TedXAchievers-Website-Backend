@@ -6,9 +6,11 @@ use axum::{
 };
 use dashmap::DashMap;
 use std::{net::SocketAddr, sync::Arc};
+use std::time::Duration;
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     limit::RequestBodyLimitLayer,
+    timeout::TimeoutLayer,
     trace::TraceLayer,
 };
 use tracing::info;
@@ -23,7 +25,7 @@ use errors::AppError;
 #[derive(Clone)]
 pub struct AppState {
     pub db: mongodb::Database,
-    pub cache: Arc<DashMap<String, serde_json::Value>>,
+    pub cache: Arc<DashMap<String, middleware::auth::CachedAuthUser>>,
     pub rate_limits: Arc<DashMap<String, std::collections::VecDeque<std::time::Instant>>>,
     pub email_queue: tokio::sync::mpsc::Sender<utils::email::EmailJob>,
     pub config: Arc<Config>,
@@ -86,6 +88,7 @@ async fn main() -> Result<(), AppError> {
         .with_state(state)
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(32 * 1024))
+        .layer(TimeoutLayer::new(Duration::from_secs(30)))
         .layer(axum::middleware::from_fn_with_state(
             middleware_state,
             middleware::rate_limit::request_rate_limit,
@@ -97,7 +100,10 @@ async fn main() -> Result<(), AppError> {
             .local_addr()
             .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?
     );
-    axum::serve(listener, app)
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))
 }

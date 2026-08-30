@@ -48,7 +48,7 @@ pub async fn register_handler(
     if let Err(error) = body.validate() {
         return Ok(validation_response(error));
     }
-    service::register(&state.db, &state.config, body).await?;
+    service::register(&state.db, &state.config, &state.email_queue, body).await?;
     Ok((
         StatusCode::CREATED,
         axum::Json(json!({ "message": "Registration successful. Check your email to verify." })),
@@ -118,8 +118,9 @@ pub async fn logout_handler(
 }
 pub async fn verify_email_handler(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<VerifyEmailDto>,
+    Json(mut body): Json<VerifyEmailDto>,
 ) -> Result<impl IntoResponse, AppError> {
+    body.email = body.email.trim().to_lowercase();
     if let Err(error) = body.validate() {
         return Ok(validation_response(error));
     }
@@ -138,21 +139,22 @@ pub async fn forgot_password_handler(
     if let Err(error) = body.validate() {
         return Ok(validation_response(error));
     }
-    service::forgot_password(&state.db, &state.config, body).await?;
+    service::forgot_password(&state.db, &state.config, &state.email_queue, body).await?;
     Ok((
         StatusCode::OK,
-        axum::Json(json!({ "message": "If that email exists, a reset link has been sent" })),
+        axum::Json(json!({ "message": "If that email exists, a reset code has been sent" })),
     )
         .into_response())
 }
 pub async fn reset_password_handler(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<ResetPasswordDto>,
+    Json(mut body): Json<ResetPasswordDto>,
 ) -> Result<impl IntoResponse, AppError> {
+    body.email = body.email.trim().to_lowercase();
     if let Err(error) = body.validate() {
         return Ok(validation_response(error));
     }
-    service::reset_password(&state.db, body).await?;
+    service::reset_password(&state.db, &state.cache, body).await?;
     Ok((
         StatusCode::OK,
         axum::Json(json!({ "message": "Password reset successful" })),

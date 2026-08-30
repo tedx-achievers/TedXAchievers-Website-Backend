@@ -11,7 +11,9 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use mongodb::bson::doc;
 use std::{collections::HashMap, sync::Arc};
+use tracing::error;
 use validator::Validate;
 
 fn validation_response(error: validator::ValidationErrors) -> Response {
@@ -68,6 +70,39 @@ pub async fn apply_handler(
             ),
         },
     );
+    let admins = state.db.collection::<crate::models::user::User>("users");
+    match admins.find(doc! { "role": "admin" }, None).await {
+        Ok(mut cursor) => loop {
+            match cursor.advance().await {
+                Ok(true) => match cursor.deserialize_current() {
+                    Ok(admin) => crate::utils::email::enqueue(
+                        &state.email_queue,
+                        crate::utils::email::EmailJob {
+                            to_email: admin.email,
+                            to_name: admin.name,
+                            subject: "New TEDxAchievers volunteer application".to_owned(),
+                            html: crate::utils::email::volunteer_admin_notification_html(
+                                &state.config.frontend_url,
+                                &application.reference_code,
+                                &application.full_name,
+                                &application.email,
+                                &application.department,
+                                preferred_role,
+                                &application.created_at.format("%B %d, %Y").to_string(),
+                            ),
+                        },
+                    ),
+                    Err(error) => error!(%error, "Could not read an admin recipient"),
+                },
+                Ok(false) => break,
+                Err(error) => {
+                    error!(%error, "Could not list admin email recipients");
+                    break;
+                }
+            }
+        },
+        Err(error) => error!(%error, "Could not query admin email recipients"),
+    }
     Ok((StatusCode::CREATED, Json(application)).into_response())
 }
 

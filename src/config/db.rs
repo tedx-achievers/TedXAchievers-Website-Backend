@@ -43,12 +43,6 @@ pub async fn connect_db(config: &Config) -> Database {
             .build()
     };
     let normal = |field: &str| IndexModel::builder().keys(doc! { field: 1 }).build();
-    let sparse = |field: &str| {
-        IndexModel::builder()
-            .keys(doc! { field: 1 })
-            .options(IndexOptions::builder().sparse(true).build())
-            .build()
-    };
     let ttl = IndexModel::builder()
         .keys(doc! { "expires_at": 1 })
         .options(
@@ -62,8 +56,6 @@ pub async fn connect_db(config: &Config) -> Database {
             "users",
             vec![
                 unique("email"),
-                sparse("verify_token"),
-                sparse("reset_token"),
             ],
         ),
         (

@@ -8,17 +8,20 @@ pub struct Claims {
     pub email: String,
     pub role: UserRole,
     pub is_verified: bool,
+    pub security_version: u64,
     pub exp: usize,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RefreshClaims {
     pub sub: String,
+    pub security_version: u64,
     pub exp: usize,
 }
 pub fn sign_access_token(
     user_id: &str,
     email: &str,
     role: &UserRole,
+    security_version: u64,
     config: &Config,
 ) -> Result<String, AppError> {
     let claims = Claims {
@@ -26,6 +29,7 @@ pub fn sign_access_token(
         email: email.to_owned(),
         role: role.clone(),
         is_verified: true,
+        security_version,
         exp: (Utc::now().timestamp() as u64 + config.jwt_access_expires_secs) as usize,
     };
     encode(
@@ -35,9 +39,14 @@ pub fn sign_access_token(
     )
     .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))
 }
-pub fn sign_refresh_token(user_id: &str, config: &Config) -> Result<String, AppError> {
+pub fn sign_refresh_token(
+    user_id: &str,
+    security_version: u64,
+    config: &Config,
+) -> Result<String, AppError> {
     let claims = RefreshClaims {
         sub: user_id.to_owned(),
+        security_version,
         exp: (Utc::now().timestamp() as u64 + config.jwt_refresh_expires_secs) as usize,
     };
     encode(

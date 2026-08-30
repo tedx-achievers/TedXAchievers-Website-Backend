@@ -53,6 +53,10 @@ impl Config {
                 panic!("Every FRONTEND_URL origin must be HTTPS without a trailing slash");
             }
         }
+        let jwt_access_expires_secs = parsed("JWT_ACCESS_EXPIRES_SECS");
+        if jwt_access_expires_secs == 0 || jwt_access_expires_secs > 900 {
+            panic!("JWT_ACCESS_EXPIRES_SECS must be between 1 and 900 seconds");
+        }
         Self {
             port: parsed("PORT"),
             mongodb_uri: required("MONGODB_URI"),
@@ -60,7 +64,7 @@ impl Config {
             jwt_access_secret_previous: optional("JWT_ACCESS_SECRET_PREVIOUS"),
             jwt_refresh_secret: required("JWT_REFRESH_SECRET"),
             jwt_refresh_secret_previous: optional("JWT_REFRESH_SECRET_PREVIOUS"),
-            jwt_access_expires_secs: parsed("JWT_ACCESS_EXPIRES_SECS"),
+            jwt_access_expires_secs,
             jwt_refresh_expires_secs: parsed("JWT_REFRESH_EXPIRES_SECS"),
             frontend_url: frontend_urls[0].clone(),
             frontend_urls,

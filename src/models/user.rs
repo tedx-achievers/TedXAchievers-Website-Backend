@@ -14,10 +14,20 @@ pub struct User {
     pub role: UserRole,
     #[serde(default)]
     pub is_verified: bool,
-    pub verify_token: Option<String>,
-    pub verify_token_expiry: Option<DateTime<Utc>>,
-    pub reset_token: Option<String>,
-    pub reset_token_expiry: Option<DateTime<Utc>>,
+    #[serde(default, rename = "securityVersion")]
+    pub security_version: u64,
+    #[serde(default, rename = "emailVerificationCodeHash")]
+    pub email_verification_code_hash: Option<String>,
+    #[serde(default, rename = "emailVerificationCodeExpiry")]
+    pub email_verification_code_expiry: Option<DateTime<Utc>>,
+    #[serde(default, rename = "emailVerificationAttempts")]
+    pub email_verification_attempts: u32,
+    #[serde(default, rename = "passwordResetCodeHash")]
+    pub password_reset_code_hash: Option<String>,
+    #[serde(default, rename = "passwordResetCodeExpiry")]
+    pub password_reset_code_expiry: Option<DateTime<Utc>>,
+    #[serde(default, rename = "passwordResetAttempts")]
+    pub password_reset_attempts: u32,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }

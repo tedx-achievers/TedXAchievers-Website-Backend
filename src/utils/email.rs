@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
-
 use reqwest::Client;
 use serde_json::json;
+use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use crate::{config::Config, errors::AppError};
@@ -24,6 +23,75 @@ fn escape_html(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+fn social_icons_html() -> String {
+    r#"<a href="https://www.instagram.com/tedxachieversuniversity/" style="display:inline-block;margin:0 6px;background:#222;border:1px solid #383838;border-radius:999px;padding:8px;line-height:0;"><img src="https://img.icons8.com/fluency/48/instagram-new.png" width="22" height="22" alt="Instagram" style="display:block;width:22px;height:22px;border:0;"></a><a href="https://www.tiktok.com/@tedxachieversuniversity" style="display:inline-block;margin:0 6px;background:#222;border:1px solid #383838;border-radius:999px;padding:8px;line-height:0;"><img src="https://img.icons8.com/color/48/tiktok--v1.png" width="22" height="22" alt="TikTok" style="display:block;width:22px;height:22px;border:0;"></a>"#.to_owned()
+}
+
+fn email_shell(site_url: &str, body: &str, cta: Option<(&str, &str)>) -> String {
+    let site_url = site_url.trim_end_matches('/');
+    let logo_url = format!("{site_url}/logo-white.png");
+    let hero_url = format!("{site_url}/AUO_TEDxHS.png");
+    let social_icons = social_icons_html();
+    let cta_html = cta
+        .map(|(label, url)| {
+            format!(
+                r#"<table role="presentation" align="center" cellspacing="0" cellpadding="0" border="0" style="margin-top:26px;"><tr><td style="border-radius:999px;background:#e62b1e;"><a href="{}" style="display:inline-block;padding:14px 24px;border-radius:999px;color:#fff;font-size:14px;font-weight:700;text-decoration:none;">{}</a></td></tr></table>"#,
+                escape_html(url),
+                escape_html(label)
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        r##"<!doctype html><html lang="en"><head><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><style>@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');</style></head><body style="margin:0;padding:0;background:#050505;color:#fff;font-family:'Outfit',Arial,Helvetica,sans-serif;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#050505;"><tr><td align="center" style="padding:32px 16px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:620px;background:#0f0f0f;border-radius:18px 18px 0 0;overflow:hidden;"><tr><td style="height:5px;background:#e62b1e;font-size:0;line-height:0;">&nbsp;</td></tr><tr><td align="center" style="padding:28px 32px 20px;"><img src="{logo_url}" width="420" alt="TEDxAchievers" style="display:block;width:100%;max-width:420px;height:auto;border:0;"></td></tr><tr><td><img src="{hero_url}" width="620" alt="Achievers University campus" style="display:block;width:100%;height:auto;border:0;"></td></tr><tr><td style="padding:32px;">{body}{cta_html}</td></tr><tr><td align="center" style="padding:24px 32px 30px;color:#777;font-size:12px;line-height:20px;"><div style="color:#a6a6a6;font-size:13px;font-weight:700;margin-bottom:8px;">Stay connected</div>{social_icons}<div style="padding-top:16px;">Questions? <a href="mailto:admin@tedxachieversuniversity.com.ng" style="color:#a6a6a6;text-decoration:underline;">admin@tedxachieversuniversity.com.ng</a></div><div>TEDxAchievers &bull; Achievers University</div><a href="{site_url}" style="color:#a6a6a6;text-decoration:underline;">tedxachieversuniversity.com.ng</a></td></tr><tr><td style="height:5px;background:#e62b1e;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr></table></body></html>"##
+    )
+}
+
+pub fn auth_code_email_html(
+    name: &str,
+    site_url: &str,
+    heading: &str,
+    message: &str,
+    code: &str,
+    cta_label: &str,
+    cta_url: &str,
+    expires_in_minutes: u32,
+) -> String {
+    let body = format!(
+        r#"<div style="color:#fff;font-size:27px;line-height:35px;font-weight:700;margin-bottom:16px;">{}</div><div style="color:#f0f0f0;font-size:16px;line-height:27px;">Hi {},</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:10px;">{}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;background:#151515;border:1px solid #303030;"><tr><td align="center" style="padding:22px 18px 8px;color:#a6a6a6;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;">Your secure code</td></tr><tr><td align="center" style="padding:0 18px 20px;color:#e62b1e;font-size:36px;line-height:44px;font-weight:700;letter-spacing:9px;">{}</td></tr></table><div style="color:#888;font-size:13px;line-height:21px;padding-top:16px;">This code expires in {} minutes. If you did not request this, you can safely ignore this email.</div>"#,
+        escape_html(heading),
+        escape_html(name),
+        escape_html(message),
+        escape_html(code),
+        expires_in_minutes,
+    );
+    email_shell(site_url, &body, Some((cta_label, cta_url)))
+}
+
+pub fn volunteer_admin_notification_html(
+    site_url: &str,
+    application_id: &str,
+    name: &str,
+    email: &str,
+    department: &str,
+    preferred_role: &str,
+    submitted_at: &str,
+) -> String {
+    let body = format!(
+        r#"<div style="color:#fff;font-size:27px;line-height:35px;font-weight:700;">New volunteer application</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:12px;">A new volunteer application has been submitted and is ready for review.</div><table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;border:1px solid #303030;background:#101010;"><tr><td style="padding:16px 18px 8px;color:#e62b1e;font-size:11px;letter-spacing:2px;font-weight:700;text-transform:uppercase;">Application summary</td></tr><tr><td style="padding:6px 18px;color:#aaa;font-size:14px;">Name: <span style="color:#fff;">{}</span></td></tr><tr><td style="padding:6px 18px;color:#aaa;font-size:14px;">Email: <span style="color:#fff;">{}</span></td></tr><tr><td style="padding:6px 18px;color:#aaa;font-size:14px;">Reference: <span style="color:#fff;">{}</span></td></tr><tr><td style="padding:6px 18px;color:#aaa;font-size:14px;">Department: <span style="color:#fff;">{}</span></td></tr><tr><td style="padding:6px 18px;color:#aaa;font-size:14px;">Preferred role: <span style="color:#fff;">{}</span></td></tr><tr><td style="padding:6px 18px 16px;color:#aaa;font-size:14px;">Submitted: <span style="color:#fff;">{}</span></td></tr></table>"#,
+        escape_html(name),
+        escape_html(email),
+        escape_html(application_id),
+        escape_html(department),
+        escape_html(preferred_role),
+        escape_html(submitted_at),
+    );
+    email_shell(
+        site_url,
+        &body,
+        Some(("Review application", &format!("{}/admin/volunteers", site_url))),
+    )
+}
+
 pub fn volunteer_application_received_html(
     name: &str,
     site_url: &str,
@@ -32,63 +100,18 @@ pub fn volunteer_application_received_html(
     department: &str,
     submitted_at: &str,
 ) -> String {
-    let safe_name = escape_html(name);
-    let safe_application_id = escape_html(application_id);
-    let safe_preferred_role = escape_html(preferred_role);
-    let safe_department = escape_html(department);
-    let safe_submitted_at = escape_html(submitted_at);
-    let site_url = site_url.trim_end_matches('/');
-    let logo_url = format!("{site_url}/logo-white.png");
-    let hero_url = format!("{site_url}/AUO_TEDxHS.png");
-    let volunteer_url = format!("{site_url}/volunteers");
-    format!(
-        r##"<!doctype html>
-<html lang="en">
-<head><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><style>@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');</style></head>
-<body style="margin:0;padding:0;background-color:#050505;color:#ffffff;font-family:'Outfit',Arial,Helvetica,sans-serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#050505;">
-    <tr><td align="center" style="padding:32px 16px;">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:620px;background-color:#0f0f0f;border-radius:18px 18px 0 0;overflow:hidden;">
-        <tr><td style="height:5px;background-color:#e62b1e;font-size:0;line-height:0;">&nbsp;</td></tr>
-        <tr><td align="center" style="padding:28px 32px 20px;background-color:#0f0f0f;">
-          <img src="{logo_url}" width="420" alt="TEDx Achievers" style="display:block;width:100%;max-width:420px;height:auto;border:0;">
-        </td></tr>
-        <tr><td style="padding:0 0 28px;"><img src="{hero_url}" width="620" alt="Achievers University campus" style="display:block;width:100%;max-width:620px;height:auto;border:0;border-radius:0;"></td></tr>
-        <tr><td style="padding:0 32px 34px;">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-            <tr><td style="padding:0 0 0;">
-              <div style="color:#ffffff;font-size:27px;line-height:35px;font-weight:bold;margin-bottom:16px;">Welcome to the TEDxAchievers community.</div>
-              <div style="color:#f0f0f0;font-size:16px;line-height:27px;">Hi {safe_name},</div>
-              <div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:10px;">Thank you for stepping forward to volunteer for TEDxAchievers. Your application is safely with our team and will be reviewed carefully.</div>
-              <div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:12px;">We will contact you with the next steps. Keep bringing your ideas, energy, and curiosity.</div>
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;border:1px solid #303030;border-radius:10px;background-color:#101010;">
-                <tr><td colspan="2" style="padding:16px 18px 8px;color:#e62b1e;font-size:11px;line-height:16px;letter-spacing:2px;font-weight:bold;text-transform:uppercase;">Application summary</td></tr>
-                <tr><td style="padding:6px 18px;color:#777777;font-size:13px;line-height:22px;width:38%;">Reference code</td><td style="padding:6px 18px;color:#f0f0f0;font-size:13px;line-height:22px;word-break:break-all;">{safe_application_id}</td></tr>
-                <tr><td style="padding:6px 18px;color:#777777;font-size:13px;line-height:22px;">Preferred role</td><td style="padding:6px 18px;color:#f0f0f0;font-size:13px;line-height:22px;">{safe_preferred_role}</td></tr>
-                <tr><td style="padding:6px 18px;color:#777777;font-size:13px;line-height:22px;">Department</td><td style="padding:6px 18px;color:#f0f0f0;font-size:13px;line-height:22px;">{safe_department}</td></tr>
-                <tr><td style="padding:6px 18px 16px;color:#777777;font-size:13px;line-height:22px;">Submitted</td><td style="padding:6px 18px 16px;color:#f0f0f0;font-size:13px;line-height:22px;">{safe_submitted_at}</td></tr>
-              </table>
-              <table role="presentation" align="center" cellspacing="0" cellpadding="0" border="0" style="margin-top:26px;">
-                <tr><td align="center" style="border-radius:999px;background-color:#e62b1e;">
-                  <a href="{volunteer_url}" style="display:inline-block;padding:14px 24px;border-radius:999px;color:#ffffff;font-size:14px;font-weight:bold;letter-spacing:.4px;text-decoration:none;">Visit the volunteer page</a>
-                </td></tr>
-              </table>
-            </td></tr>
-          </table>
-        </td></tr>
-        <tr><td align="center" style="padding:0 32px 30px;color:#777777;font-size:12px;line-height:20px;">
-          <div style="color:#a6a6a6;font-size:13px;font-weight:bold;margin-bottom:8px;">Stay connected</div>
-          <a href="https://www.instagram.com/tedxachieversuniversity/" style="display:inline-block;margin:0 5px;color:#ffffff;text-decoration:none;background-color:#222222;border:1px solid #383838;border-radius:999px;padding:7px 12px;font-size:12px;"><img src="https://cdn.simpleicons.org/instagram/ffffff" width="15" height="15" alt="Instagram" style="display:inline-block;width:15px;height:15px;vertical-align:middle;border:0;margin-right:5px;">Instagram</a>
-          <a href="https://www.tiktok.com/@tedxachieversuniversity" style="display:inline-block;margin:0 5px;color:#ffffff;text-decoration:none;background-color:#222222;border:1px solid #383838;border-radius:999px;padding:7px 12px;font-size:12px;"><img src="https://cdn.simpleicons.org/tiktok/ffffff" width="15" height="15" alt="TikTok" style="display:inline-block;width:15px;height:15px;vertical-align:middle;border:0;margin-right:5px;">TikTok</a>
-          <div style="padding-top:16px;">Questions? <a href="mailto:admin@tedxachieversuniversity.com.ng" style="color:#a6a6a6;text-decoration:underline;">admin@tedxachieversuniversity.com.ng</a></div>
-          <div>TEDxAchievers &bull; Achievers University</div>
-          <a href="{site_url}" style="color:#a6a6a6;text-decoration:underline;">tedxachieversuniversity.com.ng</a>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>"##
+    let body = format!(
+        r#"<div style="color:#fff;font-size:27px;line-height:35px;font-weight:700;margin-bottom:16px;">Welcome to the TEDxAchievers community.</div><div style="color:#f0f0f0;font-size:16px;line-height:27px;">Hi {},</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:10px;">Thank you for stepping forward to volunteer for TEDxAchievers. Your application is safely with our team and will be reviewed carefully.</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:12px;">We will contact you with the next steps. Keep bringing your ideas, energy, and curiosity.</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;border:1px solid #303030;border-radius:10px;background:#101010;"><tr><td colspan="2" style="padding:16px 18px 8px;color:#e62b1e;font-size:11px;line-height:16px;letter-spacing:2px;font-weight:700;text-transform:uppercase;">Application summary</td></tr><tr><td style="padding:6px 18px;color:#777;font-size:13px;width:38%;">Reference code</td><td style="padding:6px 18px;color:#f0f0f0;font-size:13px;word-break:break-all;">{}</td></tr><tr><td style="padding:6px 18px;color:#777;font-size:13px;">Preferred role</td><td style="padding:6px 18px;color:#f0f0f0;font-size:13px;">{}</td></tr><tr><td style="padding:6px 18px;color:#777;font-size:13px;">Department</td><td style="padding:6px 18px;color:#f0f0f0;font-size:13px;">{}</td></tr><tr><td style="padding:6px 18px 16px;color:#777;font-size:13px;">Submitted</td><td style="padding:6px 18px 16px;color:#f0f0f0;font-size:13px;">{}</td></tr></table>"#,
+        escape_html(name),
+        escape_html(application_id),
+        escape_html(preferred_role),
+        escape_html(department),
+        escape_html(submitted_at),
+    );
+    email_shell(
+        site_url,
+        &body,
+        Some(("Visit the volunteer page", &format!("{}/volunteers", site_url.trim_end_matches('/')))),
     )
 }
 
@@ -96,15 +119,7 @@ pub fn start_worker(config: Arc<Config>) -> mpsc::Sender<EmailJob> {
     let (sender, mut receiver) = mpsc::channel::<EmailJob>(1_000);
     tokio::spawn(async move {
         while let Some(job) = receiver.recv().await {
-            if let Err(error) = send_email(
-                &job.to_email,
-                &job.to_name,
-                &job.subject,
-                &job.html,
-                &config,
-            )
-            .await
-            {
+            if let Err(error) = send_email(&job.to_email, &job.to_name, &job.subject, &job.html, &config).await {
                 error!(%error, recipient = %job.to_email, "Queued email could not be sent");
             }
         }
@@ -130,10 +145,7 @@ pub async fn send_email(
         .header("api-key", &config.brevo_api_key)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&json!({
-            "sender": {
-                "name": config.brevo_sender_name,
-                "email": config.brevo_sender_email,
-            },
+            "sender": { "name": config.brevo_sender_name, "email": config.brevo_sender_email },
             "to": [{ "email": to_email, "name": to_name }],
             "subject": subject,
             "htmlContent": html,
@@ -146,14 +158,9 @@ pub async fn send_email(
         })?;
     if !response.status().is_success() {
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .unwrap_or_else(|error| format!("Unable to read response body: {error}"));
+        let body = response.text().await.unwrap_or_else(|error| format!("Unable to read response body: {error}"));
         error!(%status, %body, recipient = to_email, "Brevo rejected email request");
-        return Err(AppError::Internal(anyhow::anyhow!(
-            "Brevo returned {status}: {body}"
-        )));
+        return Err(AppError::Internal(anyhow::anyhow!("Brevo returned {status}: {body}")));
     }
     info!(recipient = to_email, "Email sent successfully");
     Ok(())

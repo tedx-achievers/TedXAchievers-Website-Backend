@@ -2,35 +2,48 @@ use std::sync::Arc;
 
 use chrono::{Duration, Utc};
 use mongodb::{bson::doc, Database};
-use tracing::{error, info};
-use uuid::Uuid;
+use tracing::info;
 
 use crate::{
     config::Config,
     errors::AppError,
+    middleware::auth::{invalidate_user_cache, CachedAuthUser},
     models::{
         refresh_token::RefreshToken,
         user::{User, UserRole},
     },
     utils::{
-        email::send_email,
         hash::{hash_password, verify_password},
         jwt::{sign_access_token, sign_refresh_token, verify_refresh_token},
     },
 };
+use dashmap::DashMap;
+use rand::Rng;
+use tokio::sync::mpsc::Sender;
 
 use super::dto::{ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto, VerifyEmailDto};
 
 const USERS: &str = "users";
 const REFRESH_TOKENS: &str = "refresh_tokens";
+const CODE_TTL_MINUTES: i64 = 15;
+const MAX_CODE_ATTEMPTS: u32 = 5;
+
+fn is_six_digit_code(code: &str) -> bool {
+    code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit())
+}
 
 fn database_error(error: impl std::fmt::Display) -> AppError {
     AppError::Internal(anyhow::anyhow!(error.to_string()))
 }
 
+fn generate_code() -> String {
+    format!("{:06}", rand::thread_rng().gen_range(0..1_000_000))
+}
+
 pub async fn register(
     db: &Database,
     config: &Arc<Config>,
+    email_queue: &Sender<crate::utils::email::EmailJob>,
     dto: RegisterDto,
 ) -> Result<(), AppError> {
     let email = dto.email.trim().to_lowercase();
@@ -43,7 +56,8 @@ pub async fn register(
     {
         return Err(AppError::Conflict("Email already registered".to_owned()));
     }
-    let verify_token = Uuid::new_v4().to_string();
+    let verification_code = generate_code();
+    let verification_code_hash = hash_password(&verification_code)?;
     let now = Utc::now();
     let user = User {
         id: None,
@@ -53,37 +67,40 @@ pub async fn register(
         password: hash_password(&dto.password)?,
         role: UserRole::Attendee,
         is_verified: false,
-        verify_token: Some(verify_token.clone()),
-        verify_token_expiry: Some(now + Duration::hours(24)),
-        reset_token: None,
-        reset_token_expiry: None,
+        security_version: 0,
+        email_verification_code_hash: Some(verification_code_hash),
+        email_verification_code_expiry: Some(now + Duration::minutes(CODE_TTL_MINUTES)),
+        email_verification_attempts: 0,
+        password_reset_code_hash: None,
+        password_reset_code_expiry: None,
+        password_reset_attempts: 0,
         created_at: Some(now),
         updated_at: Some(now),
     };
-    users
-        .insert_one(&user, None)
-        .await
-        .map_err(database_error)?;
-    let mail_config = Arc::clone(config);
-    let name = user.name.clone();
-    let mail_email = email.clone();
-    let link = format!(
-        "{}/verify-email?token={}",
-        config.frontend_url, verify_token
-    );
-    tokio::spawn(async move {
-        if let Err(error) = send_email(
-            &mail_email,
-            &name,
-            "Verify your email",
-            &format!("<p>Verify your email: <a href=\"{link}\">Verify email</a></p>"),
-            &mail_config,
-        )
-        .await
-        {
-            error!(%error, "Verification email could not be sent");
+    if let Err(error) = users.insert_one(&user, None).await {
+        if error.to_string().contains("E11000") {
+            return Err(AppError::Conflict("Email already registered".to_owned()));
         }
-    });
+        return Err(database_error(error));
+    }
+    crate::utils::email::enqueue(
+        email_queue,
+        crate::utils::email::EmailJob {
+            to_email: email.clone(),
+            to_name: user.name.clone(),
+            subject: "Verify your TEDxAchievers account".to_owned(),
+            html: crate::utils::email::auth_code_email_html(
+                &user.name,
+                &config.frontend_url,
+                "Verify your email",
+                "Use the secure code below to verify your TEDxAchievers account.",
+                &verification_code,
+                "Verify your email",
+                &format!("{}/verify-email", config.frontend_url.trim_end_matches('/')),
+                CODE_TTL_MINUTES as u32,
+            ),
+        },
+    );
     info!(email = %email, "User registered");
     Ok(())
 }
@@ -110,8 +127,14 @@ pub async fn login(
         .id
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("User is missing an id")))?;
     let user_id_string = user_id.to_hex();
-    let access_token = sign_access_token(&user_id_string, &user.email, &user.role, config)?;
-    let refresh_token = sign_refresh_token(&user_id_string, config)?;
+    let access_token = sign_access_token(
+        &user_id_string,
+        &user.email,
+        &user.role,
+        user.security_version,
+        config,
+    )?;
+    let refresh_token = sign_refresh_token(&user_id_string, user.security_version, config)?;
     let now = Utc::now();
     db.collection::<RefreshToken>(REFRESH_TOKENS)
         .insert_one(
@@ -157,7 +180,16 @@ pub async fn refresh(
     if user_id.to_hex() != claims.sub {
         return Err(AppError::Unauthorized);
     }
-    sign_access_token(&user_id.to_hex(), &user.email, &user.role, config)
+    if user.security_version != claims.security_version {
+        return Err(AppError::Unauthorized);
+    }
+    sign_access_token(
+        &user_id.to_hex(),
+        &user.email,
+        &user.role,
+        user.security_version,
+        config,
+    )
 }
 
 pub async fn logout(db: &Database, refresh_token_str: &str) -> Result<(), AppError> {
@@ -171,23 +203,39 @@ pub async fn logout(db: &Database, refresh_token_str: &str) -> Result<(), AppErr
 pub async fn verify_email(db: &Database, dto: VerifyEmailDto) -> Result<(), AppError> {
     let users = db.collection::<User>(USERS);
     let user = users
-        .find_one(doc! { "verify_token": dto.token }, None)
+        .find_one(doc! { "email": dto.email.trim().to_lowercase() }, None)
         .await
         .map_err(database_error)?
-        .ok_or_else(|| AppError::BadRequest("Invalid or expired token".to_owned()))?;
-    if user
-        .verify_token_expiry
-        .is_none_or(|expiry| expiry <= Utc::now())
+        .ok_or_else(|| AppError::BadRequest("Invalid or expired verification code".to_owned()))?;
+    if !is_six_digit_code(&dto.code)
+        || user.email_verification_attempts >= MAX_CODE_ATTEMPTS
+        || user.email_verification_code_hash.is_none()
+        || user.email_verification_code_expiry.is_none_or(|expiry| expiry <= Utc::now())
     {
-        return Err(AppError::BadRequest("Invalid or expired token".to_owned()));
+        return Err(AppError::BadRequest("Invalid or expired verification code".to_owned()));
     }
-    users.update_one(doc! { "_id": user.id }, doc! { "$set": { "is_verified": true, "verify_token": mongodb::bson::Bson::Null, "verify_token_expiry": mongodb::bson::Bson::Null, "updated_at": mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()) } }, None).await.map_err(database_error)?;
+    let valid = verify_password(
+        &dto.code,
+        user.email_verification_code_hash.as_deref().unwrap_or_default(),
+    )?;
+    if !valid {
+        users.update_one(
+            doc! { "_id": user.id },
+            doc! { "$inc": { "emailVerificationAttempts": 1_i64 } },
+            None,
+        )
+        .await
+        .map_err(database_error)?;
+        return Err(AppError::BadRequest("Invalid or expired verification code".to_owned()));
+    }
+    users.update_one(doc! { "_id": user.id }, doc! { "$set": { "isVerified": true, "emailVerificationCodeHash": mongodb::bson::Bson::Null, "emailVerificationCodeExpiry": mongodb::bson::Bson::Null, "emailVerificationAttempts": 0_i64, "updatedAt": mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()) } }, None).await.map_err(database_error)?;
     Ok(())
 }
 
 pub async fn forgot_password(
     db: &Database,
     config: &Arc<Config>,
+    email_queue: &Sender<crate::utils::email::EmailJob>,
     dto: ForgotPasswordDto,
 ) -> Result<(), AppError> {
     let email = dto.email.trim().to_lowercase();
@@ -199,45 +247,62 @@ pub async fn forgot_password(
     else {
         return Ok(());
     };
-    let reset_token = Uuid::new_v4().to_string();
+    let reset_code = generate_code();
+    let reset_code_hash = hash_password(&reset_code)?;
     let now = Utc::now();
-    users.update_one(doc! { "_id": user.id }, doc! { "$set": { "reset_token": &reset_token, "reset_token_expiry": mongodb::bson::DateTime::from_millis((now + Duration::hours(1)).timestamp_millis()), "updated_at": mongodb::bson::DateTime::from_millis(now.timestamp_millis()) } }, None).await.map_err(database_error)?;
-    let mail_config = Arc::clone(config);
-    let name = user.name;
-    let link = format!(
-        "{}/reset-password?token={}",
-        config.frontend_url, reset_token
+    users.update_one(doc! { "_id": user.id }, doc! { "$set": { "passwordResetCodeHash": reset_code_hash, "passwordResetCodeExpiry": mongodb::bson::DateTime::from_millis((now + Duration::minutes(CODE_TTL_MINUTES)).timestamp_millis()), "passwordResetAttempts": 0_i64, "updatedAt": mongodb::bson::DateTime::from_millis(now.timestamp_millis()) } }, None).await.map_err(database_error)?;
+    crate::utils::email::enqueue(
+        email_queue,
+        crate::utils::email::EmailJob {
+            to_email: email,
+            to_name: user.name.clone(),
+            subject: "Reset your TEDxAchievers password".to_owned(),
+            html: crate::utils::email::auth_code_email_html(
+                &user.name,
+                &config.frontend_url,
+                "Reset your password",
+                "Use the secure code below to reset your TEDxAchievers password.",
+                &reset_code,
+                "Reset your password",
+                &format!("{}/reset-password", config.frontend_url.trim_end_matches('/')),
+                CODE_TTL_MINUTES as u32,
+            ),
+        },
     );
-    tokio::spawn(async move {
-        if let Err(error) = send_email(
-            &email,
-            &name,
-            "Reset your password",
-            &format!("<p>Reset your password: <a href=\"{link}\">Reset password</a></p>"),
-            &mail_config,
-        )
-        .await
-        {
-            error!(%error, "Password reset email could not be sent");
-        }
-    });
     Ok(())
 }
 
-pub async fn reset_password(db: &Database, dto: ResetPasswordDto) -> Result<(), AppError> {
+pub async fn reset_password(
+    db: &Database,
+    cache: &DashMap<String, CachedAuthUser>,
+    dto: ResetPasswordDto,
+) -> Result<(), AppError> {
     let users = db.collection::<User>(USERS);
     let user = users
-        .find_one(doc! { "reset_token": dto.token }, None)
+        .find_one(doc! { "email": dto.email.trim().to_lowercase() }, None)
         .await
         .map_err(database_error)?
-        .ok_or_else(|| AppError::BadRequest("Invalid or expired token".to_owned()))?;
-    if user
-        .reset_token_expiry
-        .is_none_or(|expiry| expiry <= Utc::now())
+        .ok_or_else(|| AppError::BadRequest("Invalid or expired reset code".to_owned()))?;
+    if !is_six_digit_code(&dto.code)
+        || user.password_reset_attempts >= MAX_CODE_ATTEMPTS
+        || user.password_reset_code_hash.is_none()
+        || user.password_reset_code_expiry.is_none_or(|expiry| expiry <= Utc::now())
     {
-        return Err(AppError::BadRequest("Invalid or expired token".to_owned()));
+        return Err(AppError::BadRequest("Invalid or expired reset code".to_owned()));
+    }
+    let valid = verify_password(
+        &dto.code,
+        user.password_reset_code_hash.as_deref().unwrap_or_default(),
+    )?;
+    if !valid {
+        users.update_one(doc! { "_id": user.id }, doc! { "$inc": { "passwordResetAttempts": 1_i64 } }, None).await.map_err(database_error)?;
+        return Err(AppError::BadRequest("Invalid or expired reset code".to_owned()));
     }
     let password = hash_password(&dto.new_password)?;
-    users.update_one(doc! { "_id": user.id }, doc! { "$set": { "password": password, "reset_token": mongodb::bson::Bson::Null, "reset_token_expiry": mongodb::bson::Bson::Null, "updated_at": mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()) } }, None).await.map_err(database_error)?;
+    let user_id = user
+        .id
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("User is missing an id")))?;
+    users.update_one(doc! { "_id": user_id }, doc! { "$set": { "password": password, "passwordResetCodeHash": mongodb::bson::Bson::Null, "passwordResetCodeExpiry": mongodb::bson::Bson::Null, "passwordResetAttempts": 0_i64, "updatedAt": mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()) }, "$inc": { "securityVersion": 1_i64 } }, None).await.map_err(database_error)?;
+    invalidate_user_cache(cache, &user_id);
     Ok(())
 }
