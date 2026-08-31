@@ -159,7 +159,9 @@ async fn create_pending(
     let user_id = user
         .id
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("User identifier missing")))?;
-    let payment_ref = format!("TEDX-{}", Uuid::new_v4().simple());
+    // Squad requires a unique transaction reference. Keep it alphanumeric for
+    // provider compatibility; the customer-facing ticket code is separate.
+    let payment_ref = format!("TEDxACH{}", Uuid::new_v4().simple());
     let ticket = Ticket {
         id: None,
         user_id,

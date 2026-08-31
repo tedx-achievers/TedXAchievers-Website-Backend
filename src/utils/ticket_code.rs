@@ -7,5 +7,5 @@ pub fn generate_ticket_code() -> String {
         .map(char::from)
         .map(|character| character.to_ascii_uppercase())
         .collect();
-    format!("TED-{code}")
+    format!("TEDxACH-{code}")
 }
