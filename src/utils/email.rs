@@ -160,6 +160,71 @@ pub fn volunteer_application_received_html(
     )
 }
 
+fn volunteer_approval_email_html_legacy(
+    name: &str,
+    site_url: &str,
+    preferred_role: &str,
+    set_password_url: Option<&str>,
+) -> String {
+    let body = format!(
+        r#"<div style="background:#e62b1e;padding:28px 24px;color:#fff;text-align:center;margin:0 -32px 28px;"><div style="font-size:30px;line-height:38px;font-weight:700;">Congratulations {}, 🎉</div><div style="font-size:15px;line-height:24px;padding-top:6px;">You've been selected as a TEDxAchievers volunteer</div></div><div style="color:#f0f0f0;font-size:16px;line-height:27px;">Hi {}, we're thrilled to have you on the TEDxAchievers team as part of the {} unit.</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:12px;">You'll receive further details about your responsibilities and reporting time closer to the event.</div>"#,
+        escape_html(name),
+        escape_html(name),
+        escape_html(preferred_role),
+    );
+    if let Some(url) = set_password_url {
+        let body = format!(
+            r#"{}{}</div><div style="color:#a6a6a6;font-size:13px;line-height:21px;padding-top:10px;">This link expires in 7 days.</div>"#,
+            body,
+            r#"<table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;background:#151515;border:1px solid #303030;border-radius:10px;"><tr><td style="padding:18px;color:#a6a6a6;font-size:14px;line-height:23px;">An account has been created for you to access your volunteer dashboard.<br><br><strong style="color:#fff;">Important:</strong> If you already have an account with us, please ignore the button below and log in directly. Do not register a new account.</td></tr></table><table role="presentation" align="center" cellspacing="0" cellpadding="0" border="0" style="margin-top:26px;"><tr><td style="border-radius:999px;background:#e62b1e;"><a href=""#,
+        );
+        let body = body.replace("<a href=\"\"", &format!("<a href=\"{}\"", escape_html(url)));
+        return email_shell(site_url, &body, None);
+    }
+    let dashboard_url = format!("{}/dashboard", site_url.trim_end_matches('/'));
+    let body = format!(
+        r#"{}<table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;background:#151515;border:1px solid #303030;border-radius:10px;"><tr><td style="padding:18px;color:#a6a6a6;font-size:14px;line-height:23px;">Log in to your dashboard to view your volunteer status and event details.</td></tr></table>"#,
+        body
+    );
+    email_shell(site_url, &body, Some(("Go to Dashboard", &dashboard_url)))
+}
+
+pub fn volunteer_approval_email_html(
+    name: &str,
+    site_url: &str,
+    preferred_role: &str,
+    set_password_url: Option<&str>,
+) -> String {
+    let body = format!(
+        r#"<div style="background:#e62b1e;padding:28px 24px;color:#fff;text-align:center;margin:0 -32px 28px;"><div style="font-size:30px;line-height:38px;font-weight:700;">Congratulations {}, 🎉</div><div style="font-size:15px;line-height:24px;padding-top:6px;">You've been selected as a TEDxAchievers volunteer</div></div><div style="color:#f0f0f0;font-size:16px;line-height:27px;">Hi {}, we're thrilled to have you on the TEDxAchievers team as part of the {} unit.</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:12px;">You'll receive further details about your responsibilities and reporting time closer to the event.</div>"#,
+        escape_html(name),
+        escape_html(name),
+        escape_html(preferred_role),
+    );
+    if let Some(url) = set_password_url {
+        let body = format!(
+            r#"{}<table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;background:#151515;border:1px solid #303030;border-radius:10px;"><tr><td style="padding:18px;color:#a6a6a6;font-size:14px;line-height:23px;">An account has been created for you to access your volunteer dashboard.<br><br><strong style="color:#fff;">Important:</strong> If you already have an account with us, please ignore the button below and log in directly. Do not register a new account.</td></tr></table><div style="color:#a6a6a6;font-size:13px;line-height:21px;padding-top:10px;">This link expires in 7 days.</div>"#,
+            body
+        );
+        return email_shell(site_url, &body, Some(("Set Up Dashboard Access", url)));
+    }
+    let dashboard_url = format!("{}/dashboard", site_url.trim_end_matches('/'));
+    let body = format!(
+        r#"{}<table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;background:#151515;border:1px solid #303030;border-radius:10px;"><tr><td style="padding:18px;color:#a6a6a6;font-size:14px;line-height:23px;">Log in to your dashboard to view your volunteer status and event details.</td></tr></table>"#,
+        body
+    );
+    email_shell(site_url, &body, Some(("Go to Dashboard", &dashboard_url)))
+}
+
+pub fn volunteer_rejection_email_html(name: &str, site_url: &str) -> String {
+    let body = format!(
+        r#"<div style="background:#383838;padding:28px 24px;color:#fff;text-align:center;margin:0 -32px 28px;"><div style="font-size:30px;line-height:38px;font-weight:700;">Application Update</div></div><div style="color:#f0f0f0;font-size:16px;line-height:27px;">Hi {}, thank you for your interest in volunteering at TEDxAchievers.</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:12px;">After careful review, we're unable to accommodate your application at this time.</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:12px;">We appreciate your enthusiasm and hope to see you at the event as an attendee.</div>"#,
+        escape_html(name)
+    );
+    let ticket_url = format!("{}/tickets", site_url.trim_end_matches('/'));
+    email_shell(site_url, &body, Some(("Get Your Ticket", &ticket_url)))
+}
+
 pub fn start_worker(config: Arc<Config>) -> mpsc::Sender<EmailJob> {
     let (sender, mut receiver) = mpsc::channel::<EmailJob>(1_000);
     tokio::spawn(async move {

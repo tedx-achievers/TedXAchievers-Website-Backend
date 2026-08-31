@@ -13,5 +13,4 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/mine", get(my_ticket))
         .route("/:code/verify", get(verify_ticket))
         .route("/:code/checkin", patch(checkin_ticket))
-        .route("/set-password", post(set_password))
 }

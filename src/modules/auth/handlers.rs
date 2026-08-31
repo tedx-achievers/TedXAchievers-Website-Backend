@@ -2,6 +2,7 @@ use super::{
     dto::{ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto, VerifyEmailDto},
     service,
 };
+use crate::modules::tickets::dto::SetPasswordDto;
 use crate::{errors::AppError, AppState};
 use axum::{
     extract::{Json, State},
@@ -160,4 +161,32 @@ pub async fn reset_password_handler(
         axum::Json(json!({ "message": "Password reset successful" })),
     )
         .into_response())
+}
+
+pub async fn set_password_handler(
+    State(state): State<Arc<AppState>>,
+    Json(dto): Json<SetPasswordDto>,
+) -> Result<impl IntoResponse, AppError> {
+    validator::Validate::validate(&dto).map_err(|error| AppError::BadRequest(error.to_string()))?;
+    let (access_token, refresh_token) =
+        service::set_password(&state.db, &state.config, dto).await?;
+    let cookies = vec![
+        cookie_header(
+            "access_token",
+            &access_token,
+            "/",
+            state.config.jwt_access_expires_secs,
+        )?,
+        cookie_header(
+            "refresh_token",
+            &refresh_token,
+            "/api/auth/refresh",
+            state.config.jwt_refresh_expires_secs,
+        )?,
+    ];
+    state.cache.clear();
+    Ok(response_with_cookies(
+        "Password set successfully. Welcome!",
+        cookies,
+    ))
 }

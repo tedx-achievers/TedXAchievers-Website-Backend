@@ -22,6 +22,7 @@ use rand::Rng;
 use tokio::sync::mpsc::Sender;
 
 use super::dto::{ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto, VerifyEmailDto};
+use crate::modules::tickets::dto::SetPasswordDto;
 
 const USERS: &str = "users";
 const REFRESH_TOKENS: &str = "refresh_tokens";
@@ -332,4 +333,55 @@ pub async fn reset_password(
     users.update_one(doc! { "_id": user_id }, doc! { "$set": { "password": password, "passwordResetCodeHash": mongodb::bson::Bson::Null, "passwordResetCodeExpiry": mongodb::bson::Bson::Null, "passwordResetAttempts": 0_i64, "updatedAt": mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()) }, "$inc": { "securityVersion": 1_i64 } }, None).await.map_err(database_error)?;
     invalidate_user_cache(cache, &user_id);
     Ok(())
+}
+
+pub async fn set_password(
+    db: &Database,
+    config: &Arc<Config>,
+    dto: SetPasswordDto,
+) -> Result<(String, String), AppError> {
+    let users = db.collection::<User>(USERS);
+    let user = users
+        .find_one(doc! { "setPasswordToken": &dto.token }, None)
+        .await
+        .map_err(database_error)?
+        .ok_or(AppError::Unauthorized)?;
+    let user_id = user.id.ok_or(AppError::Unauthorized)?;
+    if user
+        .set_password_token_expiry
+        .ok_or(AppError::Unauthorized)?
+        < Utc::now()
+    {
+        return Err(AppError::Unauthorized);
+    }
+    let security_version = user.security_version + 1;
+    let security_version_bson = i64::try_from(security_version)
+        .map_err(|_| AppError::Internal(anyhow::anyhow!("Security version overflow")))?;
+    users
+        .update_one(
+            doc! { "_id": user_id },
+            doc! {
+                "$set": {
+                    "password": hash_password(&dto.password)?,
+                    "securityVersion": security_version_bson
+                },
+                "$unset": {
+                    "setPasswordToken": "",
+                    "setPasswordTokenExpiry": ""
+                }
+            },
+            None,
+        )
+        .await
+        .map_err(database_error)?;
+    Ok((
+        sign_access_token(
+            &user_id.to_hex(),
+            &user.email,
+            &user.role,
+            security_version,
+            config,
+        )?,
+        sign_refresh_token(&user_id.to_hex(), security_version, config)?,
+    ))
 }

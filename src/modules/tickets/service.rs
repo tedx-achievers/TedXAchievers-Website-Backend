@@ -1,4 +1,4 @@
-use super::dto::{InitiateTicketDto, SetPasswordDto, VerifyOtpDto};
+use super::dto::{InitiateTicketDto, VerifyOtpDto};
 use crate::{
     config::Config,
     errors::AppError,
@@ -261,40 +261,6 @@ pub async fn checkin(db: &Database, ticket_code: &str) -> Result<Ticket, AppErro
         ));
     }
     db.collection::<Ticket>(TICKETS).find_one_and_update(doc!{"_id":ticket.id,"checked_in":false},doc!{"$set":{"checked_in":true,"checked_in_at":mongodb::bson::DateTime::from_chrono(Utc::now()),"updated_at":mongodb::bson::DateTime::from_chrono(Utc::now())}},None).await.map_err(db_error)?.ok_or_else(||AppError::Conflict("Ticket has already been checked in".to_owned()))
-}
-pub async fn set_password(
-    db: &Database,
-    config: &Arc<Config>,
-    dto: SetPasswordDto,
-) -> Result<(String, String), AppError> {
-    let users = db.collection::<User>(USERS);
-    let user = users
-        .find_one(doc! {"setPasswordToken":&dto.token}, None)
-        .await
-        .map_err(db_error)?
-        .ok_or(AppError::Unauthorized)?;
-    let id = user.id.ok_or(AppError::Unauthorized)?;
-    if user
-        .set_password_token_expiry
-        .ok_or(AppError::Unauthorized)?
-        < Utc::now()
-    {
-        return Err(AppError::Unauthorized);
-    }
-    let version = user.security_version + 1;
-    let version_bson = i64::try_from(version)
-        .map_err(|_| AppError::Internal(anyhow::anyhow!("Security version overflow")))?;
-    users.update_one(doc!{"_id":id},doc!{"$set":{"password":hash_password(&dto.password)?,"securityVersion":version_bson},"$unset":{"setPasswordToken":"","setPasswordTokenExpiry":""}},None).await.map_err(db_error)?;
-    Ok((
-        crate::utils::jwt::sign_access_token(
-            &id.to_hex(),
-            &user.email,
-            &user.role,
-            version,
-            config,
-        )?,
-        crate::utils::jwt::sign_refresh_token(&id.to_hex(), version, config)?,
-    ))
 }
 pub async fn verify_ticket_payment(
     db: &Database,

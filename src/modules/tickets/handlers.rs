@@ -1,5 +1,5 @@
 use super::{
-    dto::{InitiateTicketDto, SetPasswordDto, VerifyOtpDto},
+    dto::{InitiateTicketDto, VerifyOtpDto},
     service,
 };
 use crate::{
@@ -10,7 +10,7 @@ use crate::{
 use axum::{
     body::Bytes,
     extract::{Path, State},
-    http::{HeaderMap, HeaderValue, StatusCode},
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -64,35 +64,6 @@ pub async fn checkin_ticket(
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(
         serde_json::json!({"success":true,"data":service::checkin(&state.db,&code).await?}),
-    ))
-}
-pub async fn set_password(
-    State(state): State<Arc<AppState>>,
-    Json(dto): Json<SetPasswordDto>,
-) -> Result<impl IntoResponse, AppError> {
-    validator::Validate::validate(&dto).map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let (access, refresh) = service::set_password(&state.db, &state.config, dto).await?;
-    state.cache.clear();
-    let mut headers = HeaderMap::new();
-    headers.append(
-        "set-cookie",
-        HeaderValue::from_str(&format!(
-            "access_token={access}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age={}",
-            state.config.jwt_access_expires_secs
-        ))
-        .map_err(|_| AppError::Internal(anyhow::anyhow!("Cookie error")))?,
-    );
-    headers.append(
-        "set-cookie",
-        HeaderValue::from_str(&format!(
-            "refresh_token={refresh}; Path=/api/auth; HttpOnly; Secure; SameSite=None; Max-Age={}",
-            state.config.jwt_refresh_expires_secs
-        ))
-        .map_err(|_| AppError::Internal(anyhow::anyhow!("Cookie error")))?,
-    );
-    Ok((
-        headers,
-        Json(serde_json::json!({"success":true,"message":"Password set successfully"})),
     ))
 }
 pub async fn webhook(

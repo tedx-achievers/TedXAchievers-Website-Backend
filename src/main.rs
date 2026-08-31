@@ -84,6 +84,7 @@ async fn main() -> Result<(), AppError> {
         .nest("/api/tickets", modules::tickets::router())
         .nest("/api/volunteers", modules::volunteers::router())
         .nest("/api/admin", modules::admin::router())
+        .nest("/api/dashboard", modules::dashboard::router())
         .fallback(not_found)
         .with_state(state)
         .layer(cors)

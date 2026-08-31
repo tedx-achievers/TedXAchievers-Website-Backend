@@ -149,6 +149,6 @@ pub async fn admin_update_status_handler(
     ) {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::json!({ "success": false, "message": "Status must be approved or rejected" }))).into_response());
     }
-    let application = service::update_status(&state.db, &id, body).await?;
+    let application = service::update_status(&state.db, &state.config, &id, body).await?;
     Ok((StatusCode::OK, Json(application)).into_response())
 }

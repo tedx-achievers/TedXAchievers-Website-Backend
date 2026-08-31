@@ -1,6 +1,6 @@
 use super::handlers::{
     forgot_password_handler, login_handler, logout_handler, refresh_handler, register_handler,
-    reset_password_handler, verify_email_handler,
+    reset_password_handler, set_password_handler, verify_email_handler,
 };
 use crate::AppState;
 use axum::{routing::post, Router};
@@ -15,4 +15,5 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/verify-email", post(verify_email_handler))
         .route("/forgot-password", post(forgot_password_handler))
         .route("/reset-password", post(reset_password_handler))
+        .route("/set-password", post(set_password_handler))
 }
