@@ -63,7 +63,7 @@ pub fn generate_ticket_pdf(
     layer.use_text(attendee_email, 9.0, Mm(20.0), Mm(233.0), &font);
 
     layer.set_fill_color(Color::Rgb(Rgb::new(0.08, 0.08, 0.08, None)));
-    layer.add_polygon(rectangle(Mm(20.0), Mm(170.0), Mm(170.0), Mm(56.0)));
+    layer.add_polygon(rectangle(Mm(20.0), Mm(170.0), Mm(170.0), Mm(62.0)));
     draw_line(
         &layer,
         Mm(20.0),
@@ -99,32 +99,37 @@ pub fn generate_ticket_pdf(
     draw_line(
         &layer,
         Mm(80.0),
-        Mm(204.0),
+        Mm(212.0),
         Mm(80.0),
-        Mm(186.0),
+        Mm(194.0),
         muted.clone(),
     );
     draw_line(
         &layer,
         Mm(130.0),
-        Mm(204.0),
+        Mm(212.0),
         Mm(130.0),
-        Mm(186.0),
+        Mm(194.0),
         muted.clone(),
     );
 
     layer.set_fill_color(muted.clone());
     layer.use_text("TICKET CODE", 7.0, Mm(25.0), Mm(224.0), &font);
     layer.set_fill_color(white.clone());
-    let (ted_part, rest_part) = if ticket_code.len() > 3 {
-        (&ticket_code[..3], &ticket_code[3..])
+    let ted_part = if ticket_code.len() >= 4 {
+        &ticket_code[..4]
     } else {
-        (ticket_code, "")
+        ticket_code
+    };
+    let rest_part = if ticket_code.len() >= 4 {
+        &ticket_code[4..]
+    } else {
+        ""
     };
     layer.set_fill_color(red.clone());
     layer.use_text(ted_part, 12.0, Mm(25.0), Mm(217.0), &font);
     layer.set_fill_color(white.clone());
-    layer.use_text(rest_part, 12.0, Mm(32.5), Mm(217.0), &font);
+    layer.use_text(rest_part, 12.0, Mm(37.0), Mm(217.0), &font);
     layer.set_fill_color(muted.clone());
     layer.use_text("TICKET TIER", 7.0, Mm(105.0), Mm(224.0), &font);
     layer.set_fill_color(white.clone());
@@ -154,15 +159,19 @@ pub fn generate_ticket_pdf(
         .decode()
         .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
     layer.set_fill_color(white.clone());
-    layer.add_polygon(rectangle(Mm(67.0), Mm(100.0), Mm(76.0), Mm(62.0)));
+    layer.add_polygon(rectangle(Mm(67.0), Mm(95.0), Mm(76.0), Mm(72.0)));
+    let qr_scale: f32 = 0.62;
+    let qr_size_mm = (f64::from(qr_image.width()) / 72.0) * 25.4 * f64::from(qr_scale);
+    let qr_x = (67.0 + (76.0 - qr_size_mm) / 2.0) as f32;
+    let qr_y = (95.0 + (72.0 - qr_size_mm) / 2.0) as f32;
     Image::from_dynamic_image(&qr_image).add_to_layer(
         layer.clone(),
         ImageTransform {
-            translate_x: Some(Mm(69.0)),
-            translate_y: Some(Mm(102.0)),
+            translate_x: Some(Mm(qr_x)),
+            translate_y: Some(Mm(qr_y)),
             dpi: Some(72.0),
-            scale_x: Some(0.83),
-            scale_y: Some(0.83),
+            scale_x: Some(qr_scale),
+            scale_y: Some(qr_scale),
             ..Default::default()
         },
     );
@@ -170,21 +179,26 @@ pub fn generate_ticket_pdf(
     layer.use_text(
         "SCAN THIS QR CODE AT THE ENTRANCE",
         8.0,
-        Mm(64.0),
-        Mm(95.0),
+        Mm(74.0),
+        Mm(90.0),
         &font,
     );
     layer.set_fill_color(white.clone());
     layer.set_fill_color(red.clone());
-    let (ted_part, rest_part) = if ticket_code.len() > 3 {
-        (&ticket_code[..3], &ticket_code[3..])
+    let ted_part = if ticket_code.len() >= 4 {
+        &ticket_code[..4]
     } else {
-        (ticket_code, "")
+        ticket_code
+    };
+    let rest_part = if ticket_code.len() >= 4 {
+        &ticket_code[4..]
+    } else {
+        ""
     };
     layer.set_fill_color(red.clone());
-    layer.use_text(ted_part, 14.0, Mm(80.0), Mm(87.0), &font);
+    layer.use_text(ted_part, 14.0, Mm(85.0), Mm(82.0), &font);
     layer.set_fill_color(white.clone());
-    layer.use_text(rest_part, 14.0, Mm(91.0), Mm(87.0), &font);
+    layer.use_text(rest_part, 14.0, Mm(98.0), Mm(82.0), &font);
     layer.set_fill_color(footer_muted.clone());
     layer.set_fill_color(footer_muted);
     layer.use_text(

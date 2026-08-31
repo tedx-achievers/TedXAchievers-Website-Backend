@@ -3,7 +3,9 @@ use async_trait::async_trait;
 use axum::{extract::FromRequestParts, http::request::Parts};
 use std::sync::Arc;
 pub struct RequireAttendee(pub AuthUser);
+#[allow(dead_code)]
 pub struct RequireVolunteer(pub AuthUser);
+#[allow(dead_code)]
 pub struct RequireAdmin(pub AuthUser);
 macro_rules! role_extractor {
     ($name:ident, $check:ident) => {

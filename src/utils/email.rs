@@ -50,7 +50,7 @@ fn qr_grid_html(ticket_code: &str) -> String {
 }
 
 fn social_icons_html() -> String {
-    r#"<a href="https://www.instagram.com/tedxachieversuniversity/" style="display:inline-block;margin:0 6px;background:#222;border:1px solid #383838;border-radius:999px;padding:8px;line-height:0;"><img src="https://img.icons8.com/fluency/48/instagram-new.png" width="22" height="22" alt="Instagram" style="display:block;width:22px;height:22px;border:0;"></a><a href="https://www.tiktok.com/@tedxachieversuniversity" style="display:inline-block;margin:0 6px;background:#222;border:1px solid #383838;border-radius:999px;padding:8px;line-height:0;"><img src="https://img.icons8.com/color/48/tiktok--v1.png" width="22" height="22" alt="TikTok" style="display:block;width:22px;height:22px;border:0;"></a>"#.to_owned()
+    r#"<a href="https://www.instagram.com/tedxachieversuniversity/" aria-label="Instagram" style="display:inline-block;margin:0 6px;background:#222;border:1px solid #383838;border-radius:999px;padding:10px;line-height:0;"><img src="https://cdn.simpleicons.org/instagram/E4405F" width="24" height="24" alt="Instagram" style="display:block;width:24px;height:24px;border:0;"></a><a href="https://www.tiktok.com/@tedxachieversuniversity" aria-label="TikTok" style="display:inline-block;margin:0 6px;background:#222;border:1px solid #383838;border-radius:999px;padding:10px;line-height:0;"><img src="https://cdn.simpleicons.org/tiktok/FFFFFF" width="24" height="24" alt="TikTok" style="display:block;width:24px;height:24px;border:0;"></a>"#.to_owned()
 }
 
 fn email_shell(site_url: &str, body: &str, cta: Option<(&str, &str)>) -> String {
@@ -160,6 +160,7 @@ pub fn volunteer_application_received_html(
     )
 }
 
+#[cfg(any())]
 fn volunteer_approval_email_html_legacy(
     name: &str,
     site_url: &str,
@@ -335,6 +336,11 @@ pub fn ticket_confirmation_email_html(
 ) -> String {
     let _ = qr_base64;
     let qr_html = qr_grid_html(ticket_code);
+    let (ticket_prefix, ticket_suffix) = if ticket_code.len() > 4 {
+        (&ticket_code[..4], &ticket_code[4..])
+    } else {
+        (ticket_code, "")
+    };
     let body = format!(
         r#"<div style="background:#e62b1e;padding:28px 24px;color:#fff;text-align:center;margin:0 -32px 28px;"><div style="font-size:30px;line-height:38px;font-weight:700;">Your ticket is confirmed 🎟</div><div style="font-size:15px;line-height:24px;padding-top:6px;">See you at {}!</div></div><div style="color:#f0f0f0;font-size:16px;line-height:27px;">Hi {},</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:10px;">Your ticket has been confirmed. Present the QR code below at the entrance on event day. Save this email or screenshot the QR code.</div><table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;border:1px solid #303030;border-radius:10px;background:#151515;"><tr><td colspan="2" style="padding:16px 18px 8px;color:#e62b1e;font-size:11px;letter-spacing:2px;font-weight:700;text-transform:uppercase;">Ticket details</td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">TICKET CODE</td><td style="padding:7px 18px;color:#e62b1e;font-family:monospace;font-weight:700;font-size:14px;">{}</td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">TIER</td><td style="padding:7px 18px;color:#fff;font-size:13px;">{}</td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">AMOUNT PAID</td><td style="padding:7px 18px;color:#fff;font-size:13px;">{}</td></tr><tr><td colspan="2" style="padding:10px 18px;border-top:1px solid #303030;"></td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">DATE</td><td style="padding:7px 18px;color:#fff;font-size:13px;">{}</td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">TIME</td><td style="padding:7px 18px;color:#fff;font-size:13px;">{}</td></tr><tr><td style="padding:7px 18px 16px;color:#a6a6a6;font-size:13px;">VENUE</td><td style="padding:7px 18px 16px;color:#fff;font-size:13px;">{}</td></tr></table><div style="padding-top:28px;text-align:center;color:#a6a6a6;font-size:11px;letter-spacing:1.5px;font-weight:700;">SCAN AT THE ENTRANCE</div><div style="text-align:center;padding:14px 0;"><div style="display:inline-block;background:#fff;padding:12px;border-radius:12px;">{}</div></div><div style="text-align:center;color:#777;font-family:monospace;font-size:13px;letter-spacing:2px;">{}</div><div style="text-align:center;color:#a6a6a6;font-size:13px;line-height:21px;padding-top:24px;">Access your ticket anytime from your dashboard. This link expires in 7 days.</div>"#,
         escape_html(event_name),
@@ -352,6 +358,27 @@ pub fn ticket_confirmation_email_html(
         "Your ticket has been confirmed. Present the QR code below at the entrance on event day. Save this email or screenshot the QR code.",
         "Your ticket is confirmed, and your printable PDF ticket is attached to this email. The QR code shown below is a convenient fallback for check-in. Keep the PDF or this email handy and present either QR code at the entrance on event day.",
     );
+    let details_code_old = format!(
+        r#"<td style="padding:7px 18px;color:#e62b1e;font-family:monospace;font-weight:700;font-size:14px;">{}</td>"#,
+        escape_html(ticket_code)
+    );
+    let details_code_new = format!(
+        r#"<td style="padding:7px 18px;font-family:monospace;font-weight:700;font-size:14px;"><span style="color:#e62b1e;">{}</span><span style="color:#fff;">{}</span></td>"#,
+        escape_html(ticket_prefix),
+        escape_html(ticket_suffix)
+    );
+    let qr_code_old = format!(
+        r#"<div style="text-align:center;color:#777;font-family:monospace;font-size:13px;letter-spacing:2px;">{}</div>"#,
+        escape_html(ticket_code)
+    );
+    let qr_code_new = format!(
+        r#"<div style="text-align:center;font-family:monospace;font-size:13px;letter-spacing:2px;"><span style="color:#e62b1e;">{}</span><span style="color:#fff;">{}</span></div>"#,
+        escape_html(ticket_prefix),
+        escape_html(ticket_suffix)
+    );
+    let body = body
+        .replace(&details_code_old, &details_code_new)
+        .replace(&qr_code_old, &qr_code_new);
     email_shell(
         site_url,
         &body,

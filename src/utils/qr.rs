@@ -1,39 +1,42 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
-use image::{DynamicImage, ImageBuffer, ImageFormat, Luma};
-use qrcode::{Color, QrCode};
+use image::{ImageBuffer, ImageFormat, Rgba};
+use qrcode::{Color as QrColor, QrCode};
 use std::io::Cursor;
 
 use crate::errors::AppError;
 
 pub fn generate_qr_base64(data: &str) -> Result<String, AppError> {
-    let code = QrCode::new(data.as_bytes())
-        .map_err(|_| AppError::Internal(anyhow::anyhow!("QR generation failed")))?;
-    let modules = code.width();
-    let scale = 8u32;
-    let border = 4u32;
-    let image_size = (modules as u32 + border * 2) * scale;
-    let colors = code.to_colors();
-    let image = ImageBuffer::from_fn(image_size, image_size, |x, y| {
-        let module_x = x / scale;
-        let module_y = y / scale;
-        let value = if module_x < border
-            || module_y < border
-            || module_x >= modules as u32 + border
-            || module_y >= modules as u32 + border
-        {
-            255
-        } else {
-            match colors[((module_y - border) as usize) * modules + (module_x - border) as usize] {
-                Color::Dark => 0,
-                Color::Light => 255,
+    let code =
+        QrCode::new(data.as_bytes()).map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+    let width = code.width();
+    let scale = 10usize;
+    let quiet = 4usize;
+    let image_size = (width + quiet * 2) * scale;
+    let mut image = ImageBuffer::from_pixel(
+        image_size as u32,
+        image_size as u32,
+        Rgba([0xff_u8, 0xff_u8, 0xff_u8, 0xff_u8]),
+    );
+    for (index, bit) in code.to_colors().iter().enumerate() {
+        if *bit != QrColor::Dark {
+            continue;
+        }
+        let row = index / width;
+        let column = index % width;
+        for dy in 0..scale {
+            for dx in 0..scale {
+                image.put_pixel(
+                    ((column + quiet) * scale + dx) as u32,
+                    ((row + quiet) * scale + dy) as u32,
+                    Rgba([0xe6_u8, 0x2b_u8, 0x1e_u8, 0xff_u8]),
+                );
             }
-        };
-        Luma([value])
-    });
+        }
+    }
     let mut bytes = Cursor::new(Vec::new());
-    DynamicImage::ImageLuma8(image)
+    image
         .write_to(&mut bytes, ImageFormat::Png)
-        .map_err(|_| AppError::Internal(anyhow::anyhow!("QR generation failed")))?;
+        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
     Ok(format!(
         "data:image/png;base64,{}",
         STANDARD.encode(bytes.into_inner())

@@ -81,6 +81,27 @@ pub struct DashboardStats {
     pub pending_volunteers: u64,
     pub approved_volunteers: u64,
     pub rejected_volunteers: u64,
+    pub total_revenue_kobo: u64,
+    pub total_revenue_ngn: String,
+    pub revenue_by_tier: TierRevenue,
+    pub tickets_by_tier: TierCount,
+    pub checkin_rate: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TierRevenue {
+    pub student: String,
+    pub general: String,
+    pub vip: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TierCount {
+    pub student: u64,
+    pub general: u64,
+    pub vip: u64,
 }
 
 #[derive(Debug, Serialize)]

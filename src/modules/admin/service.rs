@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use mongodb::{
-    bson::{doc, Regex},
+    bson::{doc, Document, Regex},
     options::FindOptions,
     Database,
 };
@@ -14,6 +14,7 @@ use crate::{
 
 use super::dto::{
     AdminAttendeeView, AdminTicketView, AdminUserView, DashboardStats, PaginatedResponse,
+    TierCount, TierRevenue,
 };
 
 const USERS: &str = "users";
@@ -54,10 +55,77 @@ fn csv_field(value: &str) -> String {
     }
 }
 
+fn format_with_commas(value: u64) -> String {
+    let digits = value.to_string();
+    let first = digits.len() % 3;
+    let mut result = String::new();
+    if first > 0 {
+        result.push_str(&digits[..first]);
+    }
+    for (index, chunk) in digits[first..].as_bytes().chunks(3).enumerate() {
+        if first > 0 || index > 0 {
+            result.push(',');
+        }
+        if let Ok(text) = std::str::from_utf8(chunk) {
+            result.push_str(text);
+        }
+    }
+    result
+}
+
+fn format_ngn(kobo: u64) -> String {
+    format!("NGN {}.{:02}", format_with_commas(kobo / 100), kobo % 100)
+}
+
+fn document_u64(document: &Document, field: &str) -> u64 {
+    document
+        .get_i64(field)
+        .ok()
+        .and_then(|value| u64::try_from(value).ok())
+        .or_else(|| document.get_i32(field).ok().map(|value| value as u64))
+        .unwrap_or(0)
+}
+
+async fn aggregate_documents(
+    collection: &mongodb::Collection<Document>,
+    pipeline: Vec<Document>,
+) -> Result<Vec<Document>, AppError> {
+    let mut cursor = collection
+        .aggregate(pipeline, None)
+        .await
+        .map_err(database_error)?;
+    let mut documents = Vec::new();
+    while cursor.advance().await.map_err(database_error)? {
+        documents.push(cursor.deserialize_current().map_err(database_error)?);
+    }
+    Ok(documents)
+}
+
 pub async fn get_dashboard_stats(db: &Database) -> Result<DashboardStats, AppError> {
     let users = db.collection::<mongodb::bson::Document>(USERS);
     let tickets = db.collection::<mongodb::bson::Document>(TICKETS);
     let volunteers = db.collection::<mongodb::bson::Document>(VOLUNTEERS);
+    let revenue_query = aggregate_documents(
+        &tickets,
+        vec![
+            doc! { "$match": { "status": "paid" } },
+            doc! { "$group": { "_id": mongodb::bson::Bson::Null, "total": { "$sum": "$amountKobo" } } },
+        ],
+    );
+    let tier_revenue_query = aggregate_documents(
+        &tickets,
+        vec![
+            doc! { "$match": { "status": "paid" } },
+            doc! { "$group": { "_id": "$tier", "total": { "$sum": "$amountKobo" } } },
+        ],
+    );
+    let tier_count_query = aggregate_documents(
+        &tickets,
+        vec![
+            doc! { "$match": { "status": "paid" } },
+            doc! { "$group": { "_id": "$tier", "count": { "$sum": 1_i64 } } },
+        ],
+    );
     let (
         total_registered,
         total_verified,
@@ -67,6 +135,9 @@ pub async fn get_dashboard_stats(db: &Database) -> Result<DashboardStats, AppErr
         pending_volunteers,
         approved_volunteers,
         rejected_volunteers,
+        total_revenue,
+        revenue_by_tier,
+        tickets_by_tier,
     ) = tokio::join!(
         users.count_documents(doc! {}, None),
         users.count_documents(doc! { "isVerified": true }, None),
@@ -76,6 +147,9 @@ pub async fn get_dashboard_stats(db: &Database) -> Result<DashboardStats, AppErr
         volunteers.count_documents(doc! { "status": "pending" }, None),
         volunteers.count_documents(doc! { "status": "approved" }, None),
         volunteers.count_documents(doc! { "status": "rejected" }, None),
+        revenue_query,
+        tier_revenue_query,
+        tier_count_query,
     );
     let counts = [
         total_registered,
@@ -90,6 +164,37 @@ pub async fn get_dashboard_stats(db: &Database) -> Result<DashboardStats, AppErr
     .into_iter()
     .map(|result| result.map_err(database_error))
     .collect::<Result<Vec<_>, _>>()?;
+    let total_revenue_kobo = total_revenue?
+        .first()
+        .map(|document| document_u64(document, "total"))
+        .unwrap_or(0);
+    let mut student_revenue = 0;
+    let mut general_revenue = 0;
+    let mut vip_revenue = 0;
+    for document in revenue_by_tier? {
+        match document.get_str("_id").unwrap_or_default() {
+            "student" => student_revenue = document_u64(&document, "total"),
+            "general" => general_revenue = document_u64(&document, "total"),
+            "vip" => vip_revenue = document_u64(&document, "total"),
+            _ => {}
+        }
+    }
+    let mut student_count = 0;
+    let mut general_count = 0;
+    let mut vip_count = 0;
+    for document in tickets_by_tier? {
+        match document.get_str("_id").unwrap_or_default() {
+            "student" => student_count = document_u64(&document, "count"),
+            "general" => general_count = document_u64(&document, "count"),
+            "vip" => vip_count = document_u64(&document, "count"),
+            _ => {}
+        }
+    }
+    let checkin_rate = if counts[2] == 0 {
+        "0.0%".to_owned()
+    } else {
+        format!("{:.1}%", counts[3] as f64 * 100.0 / counts[2] as f64)
+    };
     info!("Admin dashboard statistics loaded");
     Ok(DashboardStats {
         total_registered: counts[0],
@@ -100,6 +205,19 @@ pub async fn get_dashboard_stats(db: &Database) -> Result<DashboardStats, AppErr
         pending_volunteers: counts[5],
         approved_volunteers: counts[6],
         rejected_volunteers: counts[7],
+        total_revenue_kobo,
+        total_revenue_ngn: format_ngn(total_revenue_kobo),
+        revenue_by_tier: TierRevenue {
+            student: format_ngn(student_revenue),
+            general: format_ngn(general_revenue),
+            vip: format_ngn(vip_revenue),
+        },
+        tickets_by_tier: TierCount {
+            student: student_count,
+            general: general_count,
+            vip: vip_count,
+        },
+        checkin_rate,
     })
 }
 
