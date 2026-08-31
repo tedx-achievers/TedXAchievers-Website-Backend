@@ -44,13 +44,8 @@ pub async fn list_attendees_handler(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, AppError> {
     let (page, per_page) = pagination_params(&params)?;
-    let attendees = service::list_attendees(
-        &state.db,
-        page,
-        per_page,
-        params.get("search").cloned(),
-    )
-    .await?;
+    let attendees =
+        service::list_attendees(&state.db, page, per_page, params.get("search").cloned()).await?;
     Ok((StatusCode::OK, Json(attendees)))
 }
 
@@ -60,10 +55,9 @@ pub async fn export_attendees_handler(
 ) -> Result<Response, AppError> {
     let csv = service::export_attendees_csv(&state.db).await?;
     let mut response = Response::new(csv.into_response().into_body());
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/csv"),
-    );
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static("text/csv"));
     response.headers_mut().insert(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_static("attachment; filename=\"attendees.csv\""),
@@ -77,12 +71,7 @@ pub async fn list_volunteers_handler(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, AppError> {
     let (page, per_page) = pagination_params(&params)?;
-    let volunteers = service::list_volunteers(
-        &state.db,
-        params.get("status").cloned(),
-        page,
-        per_page,
-    )
-    .await?;
+    let volunteers =
+        service::list_volunteers(&state.db, params.get("status").cloned(), page, per_page).await?;
     Ok((StatusCode::OK, Json(volunteers)))
 }

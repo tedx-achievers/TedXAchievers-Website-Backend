@@ -1,9 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::{
-    models::{ticket::Ticket, user::User},
-};
+use crate::models::{ticket::Ticket, user::User};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,7 +55,8 @@ pub struct AdminTicketView {
 impl From<Ticket> for AdminTicketView {
     fn from(ticket: Ticket) -> Self {
         let status = match ticket.status {
-            crate::models::ticket::TicketStatus::Active => "Active",
+            crate::models::ticket::TicketStatus::Pending => "Pending",
+            crate::models::ticket::TicketStatus::Paid => "Paid",
             crate::models::ticket::TicketStatus::Cancelled => "Cancelled",
         };
         Self {

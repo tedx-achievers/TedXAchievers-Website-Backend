@@ -56,13 +56,16 @@ pub async fn connect_db(config: &Config) -> Database {
             "users",
             vec![
                 unique("email"),
+                unique_sparse_named("set_password_token", "user_set_password_token_unique"),
             ],
         ),
         (
             "tickets",
             vec![
                 unique("ticket_code"),
+                unique("payment_ref"),
                 IndexModel::builder().keys(doc! { "user_id": 1 }).build(),
+                normal("status"),
             ],
         ),
         (

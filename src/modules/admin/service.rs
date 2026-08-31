@@ -35,7 +35,10 @@ fn pages(total: u64, per_page: u64) -> u64 {
 fn escape_regex(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
-        if matches!(character, '\\' | '.' | '+' | '*' | '?' | '^' | '$' | '(' | ')' | '[' | ']' | '{' | '}' | '|') {
+        if matches!(
+            character,
+            '\\' | '.' | '+' | '*' | '?' | '^' | '$' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
+        ) {
             escaped.push('\\');
         }
         escaped.push(character);
@@ -68,7 +71,7 @@ pub async fn get_dashboard_stats(db: &Database) -> Result<DashboardStats, AppErr
         users.count_documents(doc! {}, None),
         users.count_documents(doc! { "isVerified": true }, None),
         tickets.count_documents(doc! { "status": "paid" }, None),
-        tickets.count_documents(doc! { "checkedIn": true }, None),
+        tickets.count_documents(doc! { "status": "paid", "checkedIn": true }, None),
         volunteers.count_documents(doc! {}, None),
         volunteers.count_documents(doc! { "status": "pending" }, None),
         volunteers.count_documents(doc! { "status": "approved" }, None),
@@ -167,7 +170,9 @@ pub async fn export_attendees_csv(db: &Database) -> Result<String, AppError> {
         .collection::<User>(USERS)
         .find(
             doc! {},
-            FindOptions::builder().sort(doc! { "createdAt": -1 }).build(),
+            FindOptions::builder()
+                .sort(doc! { "createdAt": -1 })
+                .build(),
         )
         .await
         .map_err(database_error)?;
@@ -192,10 +197,15 @@ pub async fn export_attendees_csv(db: &Database) -> Result<String, AppError> {
         let (ticket_code, ticket_status, checked_in) = match ticket {
             Some(ticket) => {
                 let status = match ticket.status {
-                    crate::models::ticket::TicketStatus::Active => "Active",
+                    crate::models::ticket::TicketStatus::Pending => "Pending",
+                    crate::models::ticket::TicketStatus::Paid => "Paid",
                     crate::models::ticket::TicketStatus::Cancelled => "Cancelled",
                 };
-                (ticket.ticket_code, status.to_owned(), ticket.checked_in.to_string())
+                (
+                    ticket.ticket_code,
+                    status.to_owned(),
+                    ticket.checked_in.to_string(),
+                )
             }
             None => (String::new(), String::new(), String::new()),
         };
@@ -210,7 +220,9 @@ pub async fn export_attendees_csv(db: &Database) -> Result<String, AppError> {
             csv_field(&ticket_code),
             csv_field(&ticket_status),
             checked_in,
-            user.created_at.map(|date| date.to_rfc3339()).unwrap_or_default(),
+            user.created_at
+                .map(|date| date.to_rfc3339())
+                .unwrap_or_default(),
         )
         .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
     }

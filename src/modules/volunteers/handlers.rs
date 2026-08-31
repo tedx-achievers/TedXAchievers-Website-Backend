@@ -1,7 +1,5 @@
 use super::{
-    dto::{
-        ApplyVolunteerDto, CheckStatusDto, UpdateApplicationStatusDto,
-    },
+    dto::{ApplyVolunteerDto, CheckStatusDto, UpdateApplicationStatusDto},
     service,
 };
 use crate::{errors::AppError, middleware::role::RequireAdmin, AppState};
@@ -52,6 +50,9 @@ pub async fn apply_handler(
         }
         crate::models::volunteer_application::PreferredRole::VenueAndDecoration => {
             "Venue and Decoration"
+        }
+        crate::models::volunteer_application::PreferredRole::PartnershipAndSponsorship => {
+            "Partnership and Sponsorship"
         }
     };
     crate::utils::email::enqueue(

@@ -7,7 +7,10 @@ use crate::{
 use async_trait::async_trait;
 use axum::{extract::FromRequestParts, http::request::Parts};
 use axum_extra::extract::cookie::CookieJar;
-use mongodb::{bson::{doc, oid::ObjectId}, options::FindOneOptions};
+use mongodb::{
+    bson::{doc, oid::ObjectId},
+    options::FindOneOptions,
+};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -27,10 +30,7 @@ pub struct CachedAuthUser {
 
 const AUTH_CACHE_TTL: Duration = Duration::from_secs(60);
 
-pub fn invalidate_user_cache(
-    cache: &dashmap::DashMap<String, CachedAuthUser>,
-    user_id: &ObjectId,
-) {
+pub fn invalidate_user_cache(cache: &dashmap::DashMap<String, CachedAuthUser>, user_id: &ObjectId) {
     cache.remove(&user_id.to_hex());
 }
 

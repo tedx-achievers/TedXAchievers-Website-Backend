@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use qrcode::{Color, QrCode};
 use reqwest::Client;
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -14,13 +15,38 @@ pub struct EmailJob {
     pub html: String,
 }
 
-fn escape_html(value: &str) -> String {
+pub(crate) fn escape_html(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+fn qr_grid_html(ticket_code: &str) -> String {
+    let code = match QrCode::new(ticket_code.as_bytes()) {
+        Ok(code) => code,
+        Err(_) => {
+            return "<div style=\"color:#777;padding:80px 20px;\">QR unavailable</div>".to_owned()
+        }
+    };
+    let modules = code.width();
+    let colors = code.to_colors();
+    let mut html = String::from("<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:220px;height:220px;background:#fff;\"><tbody>");
+    for y in 0..modules {
+        html.push_str("<tr>");
+        for x in 0..modules {
+            let color = match colors[y * modules + x] {
+                Color::Dark => "#000",
+                Color::Light => "#fff",
+            };
+            html.push_str(&format!("<td style=\"width:{}px;height:{}px;background:{};font-size:0;line-height:0;\">&nbsp;</td>", 220 / modules, 220 / modules, color));
+        }
+        html.push_str("</tr>");
+    }
+    html.push_str("</tbody></table>");
+    html
 }
 
 fn social_icons_html() -> String {
@@ -67,6 +93,19 @@ pub fn auth_code_email_html(
     email_shell(site_url, &body, Some((cta_label, cta_url)))
 }
 
+pub fn ticket_otp_email_html(name: &str, site_url: &str, code: &str) -> String {
+    auth_code_email_html(
+        name,
+        site_url,
+        "Verify your ticket purchase",
+        "Use this code to continue securely with your TEDxAchievers ticket purchase.",
+        code,
+        "Visit TEDxAchievers",
+        site_url,
+        10,
+    )
+}
+
 pub fn volunteer_admin_notification_html(
     site_url: &str,
     application_id: &str,
@@ -88,7 +127,10 @@ pub fn volunteer_admin_notification_html(
     email_shell(
         site_url,
         &body,
-        Some(("Review application", &format!("{}/admin/volunteers", site_url))),
+        Some((
+            "Review application",
+            &format!("{}/admin/volunteers", site_url),
+        )),
     )
 }
 
@@ -111,7 +153,10 @@ pub fn volunteer_application_received_html(
     email_shell(
         site_url,
         &body,
-        Some(("Visit the volunteer page", &format!("{}/volunteers", site_url.trim_end_matches('/')))),
+        Some((
+            "Visit the volunteer page",
+            &format!("{}/volunteers", site_url.trim_end_matches('/')),
+        )),
     )
 }
 
@@ -119,7 +164,15 @@ pub fn start_worker(config: Arc<Config>) -> mpsc::Sender<EmailJob> {
     let (sender, mut receiver) = mpsc::channel::<EmailJob>(1_000);
     tokio::spawn(async move {
         while let Some(job) = receiver.recv().await {
-            if let Err(error) = send_email(&job.to_email, &job.to_name, &job.subject, &job.html, &config).await {
+            if let Err(error) = send_email(
+                &job.to_email,
+                &job.to_name,
+                &job.subject,
+                &job.html,
+                &config,
+            )
+            .await
+            {
                 error!(%error, recipient = %job.to_email, "Queued email could not be sent");
             }
         }
@@ -158,10 +211,85 @@ pub async fn send_email(
         })?;
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_else(|error| format!("Unable to read response body: {error}"));
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|error| format!("Unable to read response body: {error}"));
         error!(%status, %body, recipient = to_email, "Brevo rejected email request");
-        return Err(AppError::Internal(anyhow::anyhow!("Brevo returned {status}: {body}")));
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "Brevo returned {status}: {body}"
+        )));
     }
     info!(recipient = to_email, "Email sent successfully");
     Ok(())
+}
+
+pub async fn send_email_with_attachment(
+    to_email: &str,
+    to_name: &str,
+    subject: &str,
+    html: &str,
+    attachment_name: &str,
+    attachment_base64: &str,
+    config: &Arc<Config>,
+) -> Result<(), AppError> {
+    let response = Client::new()
+        .post("https://api.brevo.com/v3/smtp/email")
+        .header("api-key", &config.brevo_api_key)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .json(&json!({
+            "sender": { "name": config.brevo_sender_name, "email": config.brevo_sender_email },
+            "to": [{ "email": to_email, "name": to_name }],
+            "subject": subject,
+            "htmlContent": html,
+            "attachment": [{ "content": attachment_base64, "name": attachment_name }]
+        }))
+        .send()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+    if !response.status().is_success() {
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "Brevo rejected ticket email"
+        )));
+    }
+    Ok(())
+}
+
+pub fn ticket_confirmation_email_html(
+    name: &str,
+    site_url: &str,
+    ticket_code: &str,
+    tier: &str,
+    amount: &str,
+    event_name: &str,
+    event_date: &str,
+    event_time: &str,
+    event_venue: &str,
+    qr_base64: &str,
+    set_password_url: &str,
+) -> String {
+    let _ = qr_base64;
+    let qr_html = qr_grid_html(ticket_code);
+    let body = format!(
+        r#"<div style="background:#e62b1e;padding:28px 24px;color:#fff;text-align:center;margin:0 -32px 28px;"><div style="font-size:30px;line-height:38px;font-weight:700;">Your ticket is confirmed 🎟</div><div style="font-size:15px;line-height:24px;padding-top:6px;">See you at {}!</div></div><div style="color:#f0f0f0;font-size:16px;line-height:27px;">Hi {},</div><div style="color:#a6a6a6;font-size:15px;line-height:25px;padding-top:10px;">Your ticket has been confirmed. Present the QR code below at the entrance on event day. Save this email or screenshot the QR code.</div><table width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;border:1px solid #303030;border-radius:10px;background:#151515;"><tr><td colspan="2" style="padding:16px 18px 8px;color:#e62b1e;font-size:11px;letter-spacing:2px;font-weight:700;text-transform:uppercase;">Ticket details</td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">TICKET CODE</td><td style="padding:7px 18px;color:#e62b1e;font-family:monospace;font-weight:700;font-size:14px;">{}</td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">TIER</td><td style="padding:7px 18px;color:#fff;font-size:13px;">{}</td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">AMOUNT PAID</td><td style="padding:7px 18px;color:#fff;font-size:13px;">{}</td></tr><tr><td colspan="2" style="padding:10px 18px;border-top:1px solid #303030;"></td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">DATE</td><td style="padding:7px 18px;color:#fff;font-size:13px;">{}</td></tr><tr><td style="padding:7px 18px;color:#a6a6a6;font-size:13px;">TIME</td><td style="padding:7px 18px;color:#fff;font-size:13px;">{}</td></tr><tr><td style="padding:7px 18px 16px;color:#a6a6a6;font-size:13px;">VENUE</td><td style="padding:7px 18px 16px;color:#fff;font-size:13px;">{}</td></tr></table><div style="padding-top:28px;text-align:center;color:#a6a6a6;font-size:11px;letter-spacing:1.5px;font-weight:700;">SCAN AT THE ENTRANCE</div><div style="text-align:center;padding:14px 0;"><div style="display:inline-block;background:#fff;padding:12px;border-radius:12px;">{}</div></div><div style="text-align:center;color:#777;font-family:monospace;font-size:13px;letter-spacing:2px;">{}</div><div style="text-align:center;color:#a6a6a6;font-size:13px;line-height:21px;padding-top:24px;">Access your ticket anytime from your dashboard. This link expires in 7 days.</div>"#,
+        escape_html(event_name),
+        escape_html(name),
+        escape_html(ticket_code),
+        escape_html(tier),
+        escape_html(amount),
+        escape_html(event_date),
+        escape_html(event_time),
+        escape_html(event_venue),
+        qr_html,
+        escape_html(ticket_code)
+    )
+    .replace(
+        "Your ticket has been confirmed. Present the QR code below at the entrance on event day. Save this email or screenshot the QR code.",
+        "Your ticket is confirmed, and your printable PDF ticket is attached to this email. The QR code shown below is a convenient fallback for check-in. Keep the PDF or this email handy and present either QR code at the entrance on event day.",
+    );
+    email_shell(
+        site_url,
+        &body,
+        Some(("Set Up Dashboard Access", set_password_url)),
+    )
 }

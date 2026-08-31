@@ -27,7 +27,9 @@ fn ticket_scan_path(path: &str) -> bool {
         && segments.next() == Some("api")
         && segments.next() == Some("tickets")
         && segments.next().is_some_and(|code| !code.is_empty())
-        && segments.next().is_some_and(|action| action == "verify" || action == "checkin")
+        && segments
+            .next()
+            .is_some_and(|action| action == "verify" || action == "checkin")
         && segments.next().is_none()
 }
 
@@ -69,9 +71,17 @@ pub async fn request_rate_limit(
         .unwrap_or_else(|| "unknown".to_owned());
     let path = request.uri().path();
     let (bucket, window, max_requests) = if ticket_scan_path(path) {
-        (format!("ticket-scan:{path}"), TICKET_WINDOW, TICKET_MAX_REQUESTS)
+        (
+            format!("ticket-scan:{path}"),
+            TICKET_WINDOW,
+            TICKET_MAX_REQUESTS,
+        )
     } else if sensitive_auth_path(path) {
-        (format!("sensitive-auth:{path}"), SENSITIVE_WINDOW, SENSITIVE_MAX_REQUESTS)
+        (
+            format!("sensitive-auth:{path}"),
+            SENSITIVE_WINDOW,
+            SENSITIVE_MAX_REQUESTS,
+        )
     } else {
         ("global".to_owned(), GLOBAL_WINDOW, GLOBAL_MAX_REQUESTS)
     };
@@ -101,13 +111,11 @@ pub async fn request_rate_limit(
             "content-type",
             axum::http::HeaderValue::from_static("application/json"),
         );
-        response
-            .headers_mut()
-            .insert(
-                "retry-after",
-                axum::http::HeaderValue::from_str(&window.as_secs().to_string())
-                    .expect("duration is a valid header value"),
-            );
+        response.headers_mut().insert(
+            "retry-after",
+            axum::http::HeaderValue::from_str(&window.as_secs().to_string())
+                .expect("duration is a valid header value"),
+        );
         return response;
     }
     next.run(request).await

@@ -28,6 +28,10 @@ pub struct User {
     pub password_reset_code_expiry: Option<DateTime<Utc>>,
     #[serde(default, rename = "passwordResetAttempts")]
     pub password_reset_attempts: u32,
+    #[serde(default, rename = "setPasswordToken")]
+    pub set_password_token: Option<String>,
+    #[serde(default, rename = "setPasswordTokenExpiry")]
+    pub set_password_token_expiry: Option<DateTime<Utc>>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }

@@ -15,7 +15,6 @@ use crate::{
 
 const COLLECTION: &str = "volunteer_applications";
 const ROLE_COUNTERS: &str = "volunteer_role_counters";
-const ROLE_CAP: u64 = 10;
 
 fn status_value(status: &ApplicationStatus) -> &'static str {
     match status {
@@ -35,6 +34,22 @@ fn preferred_role_value(role: &PreferredRole) -> &'static str {
         PreferredRole::Welfare => "welfare",
         PreferredRole::GraphicAndDesign => "graphic_and_design",
         PreferredRole::VenueAndDecoration => "venue_and_decoration",
+        PreferredRole::PartnershipAndSponsorship => "partnership_and_sponsorship",
+    }
+}
+
+fn preferred_role_cap(role: &str) -> u64 {
+    match role {
+        "technical" => 5,
+        "videography" => 5,
+        "photography" => 5,
+        "content" => 10,
+        "protocol_and_ushering" => 6,
+        "welfare" => 5,
+        "graphic_and_design" => 4,
+        "venue_and_decoration" => 5,
+        "partnership_and_sponsorship" => 3,
+        _ => 0,
     }
 }
 
@@ -44,7 +59,7 @@ fn application_from_dto(
     now: chrono::DateTime<Utc>,
     id: String,
 ) -> VolunteerApplication {
-    let reference_code = format!("TEDX-{}", &id.replace('-', "")[..8].to_uppercase());
+    let reference_code = format!("TEDxACH-{}", &id.replace('-', "")[..8].to_uppercase());
     VolunteerApplication {
         id,
         reference_code,
@@ -94,12 +109,13 @@ pub async fn apply(
 }
 
 async fn claim_role_slot(db: &Database, preferred_role: &str) -> Result<bool, AppError> {
+    let role_cap = preferred_role_cap(preferred_role);
     let applications = db.collection::<VolunteerApplication>(COLLECTION);
     let existing_count = applications
         .count_documents(doc! { "preferred_role": preferred_role }, None)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
-    if existing_count >= ROLE_CAP {
+    if existing_count >= role_cap {
         return Ok(false);
     }
     let counters = db.collection::<mongodb::bson::Document>(ROLE_COUNTERS);
@@ -109,7 +125,7 @@ async fn claim_role_slot(db: &Database, preferred_role: &str) -> Result<bool, Ap
         .build();
     let result = counters
         .find_one_and_update(
-            doc! { "_id": preferred_role, "count": { "$lt": ROLE_CAP as i64 } },
+            doc! { "_id": preferred_role, "count": { "$lt": role_cap as i64 } },
             doc! { "$inc": { "count": 1_i64 } },
             options,
         )
@@ -123,7 +139,7 @@ async fn claim_role_slot(db: &Database, preferred_role: &str) -> Result<bool, Ap
                 .build();
             counters
                 .find_one_and_update(
-                    doc! { "_id": preferred_role, "count": { "$lt": ROLE_CAP as i64 } },
+                    doc! { "_id": preferred_role, "count": { "$lt": role_cap as i64 } },
                     doc! { "$inc": { "count": 1_i64 } },
                     retry_options,
                 )

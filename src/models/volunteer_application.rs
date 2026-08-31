@@ -31,6 +31,7 @@ pub enum PreferredRole {
     Welfare,
     GraphicAndDesign,
     VenueAndDecoration,
+    PartnershipAndSponsorship,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

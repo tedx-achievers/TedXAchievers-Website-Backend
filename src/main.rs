@@ -5,8 +5,8 @@ use axum::{
     Json, Router,
 };
 use dashmap::DashMap;
-use std::{net::SocketAddr, sync::Arc};
 use std::time::Duration;
+use std::{net::SocketAddr, sync::Arc};
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     limit::RequestBodyLimitLayer,
@@ -104,6 +104,6 @@ async fn main() -> Result<(), AppError> {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))
 }

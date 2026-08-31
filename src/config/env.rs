@@ -15,8 +15,14 @@ pub struct Config {
     pub brevo_api_key: String,
     pub brevo_sender_email: String,
     pub brevo_sender_name: String,
-    pub paystack_secret_key: String,
-    pub paystack_webhook_secret: String,
+    pub squad_secret_key: String,
+    pub squad_webhook_secret: String,
+    pub squad_base_url: String,
+    pub event_name: String,
+    pub event_theme: String,
+    pub event_date: String,
+    pub event_time: String,
+    pub event_venue: String,
 }
 
 impl Config {
@@ -71,8 +77,14 @@ impl Config {
             brevo_api_key: required("BREVO_API_KEY"),
             brevo_sender_email: required("BREVO_SENDER_EMAIL"),
             brevo_sender_name: required("BREVO_SENDER_NAME"),
-            paystack_secret_key: required("PAYSTACK_SECRET_KEY"),
-            paystack_webhook_secret: required("PAYSTACK_WEBHOOK_SECRET"),
+            squad_secret_key: required("SQUAD_SECRET_KEY"),
+            squad_webhook_secret: required("SQUAD_WEBHOOK_SECRET"),
+            squad_base_url: required("SQUAD_BASE_URL"),
+            event_name: required("EVENT_NAME"),
+            event_theme: required("EVENT_THEME"),
+            event_date: required("EVENT_DATE"),
+            event_time: required("EVENT_TIME"),
+            event_venue: required("EVENT_VENUE"),
         }
     }
 }

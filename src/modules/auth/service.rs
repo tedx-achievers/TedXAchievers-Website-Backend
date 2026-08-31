@@ -74,6 +74,8 @@ pub async fn register(
         password_reset_code_hash: None,
         password_reset_code_expiry: None,
         password_reset_attempts: 0,
+        set_password_token: None,
+        set_password_token_expiry: None,
         created_at: Some(now),
         updated_at: Some(now),
     };
@@ -210,23 +212,32 @@ pub async fn verify_email(db: &Database, dto: VerifyEmailDto) -> Result<(), AppE
     if !is_six_digit_code(&dto.code)
         || user.email_verification_attempts >= MAX_CODE_ATTEMPTS
         || user.email_verification_code_hash.is_none()
-        || user.email_verification_code_expiry.is_none_or(|expiry| expiry <= Utc::now())
+        || user
+            .email_verification_code_expiry
+            .is_none_or(|expiry| expiry <= Utc::now())
     {
-        return Err(AppError::BadRequest("Invalid or expired verification code".to_owned()));
+        return Err(AppError::BadRequest(
+            "Invalid or expired verification code".to_owned(),
+        ));
     }
     let valid = verify_password(
         &dto.code,
-        user.email_verification_code_hash.as_deref().unwrap_or_default(),
+        user.email_verification_code_hash
+            .as_deref()
+            .unwrap_or_default(),
     )?;
     if !valid {
-        users.update_one(
-            doc! { "_id": user.id },
-            doc! { "$inc": { "emailVerificationAttempts": 1_i64 } },
-            None,
-        )
-        .await
-        .map_err(database_error)?;
-        return Err(AppError::BadRequest("Invalid or expired verification code".to_owned()));
+        users
+            .update_one(
+                doc! { "_id": user.id },
+                doc! { "$inc": { "emailVerificationAttempts": 1_i64 } },
+                None,
+            )
+            .await
+            .map_err(database_error)?;
+        return Err(AppError::BadRequest(
+            "Invalid or expired verification code".to_owned(),
+        ));
     }
     users.update_one(doc! { "_id": user.id }, doc! { "$set": { "isVerified": true, "emailVerificationCodeHash": mongodb::bson::Bson::Null, "emailVerificationCodeExpiry": mongodb::bson::Bson::Null, "emailVerificationAttempts": 0_i64, "updatedAt": mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()) } }, None).await.map_err(database_error)?;
     Ok(())
@@ -264,7 +275,10 @@ pub async fn forgot_password(
                 "Use the secure code below to reset your TEDxAchievers password.",
                 &reset_code,
                 "Reset your password",
-                &format!("{}/reset-password", config.frontend_url.trim_end_matches('/')),
+                &format!(
+                    "{}/reset-password",
+                    config.frontend_url.trim_end_matches('/')
+                ),
                 CODE_TTL_MINUTES as u32,
             ),
         },
@@ -286,17 +300,30 @@ pub async fn reset_password(
     if !is_six_digit_code(&dto.code)
         || user.password_reset_attempts >= MAX_CODE_ATTEMPTS
         || user.password_reset_code_hash.is_none()
-        || user.password_reset_code_expiry.is_none_or(|expiry| expiry <= Utc::now())
+        || user
+            .password_reset_code_expiry
+            .is_none_or(|expiry| expiry <= Utc::now())
     {
-        return Err(AppError::BadRequest("Invalid or expired reset code".to_owned()));
+        return Err(AppError::BadRequest(
+            "Invalid or expired reset code".to_owned(),
+        ));
     }
     let valid = verify_password(
         &dto.code,
         user.password_reset_code_hash.as_deref().unwrap_or_default(),
     )?;
     if !valid {
-        users.update_one(doc! { "_id": user.id }, doc! { "$inc": { "passwordResetAttempts": 1_i64 } }, None).await.map_err(database_error)?;
-        return Err(AppError::BadRequest("Invalid or expired reset code".to_owned()));
+        users
+            .update_one(
+                doc! { "_id": user.id },
+                doc! { "$inc": { "passwordResetAttempts": 1_i64 } },
+                None,
+            )
+            .await
+            .map_err(database_error)?;
+        return Err(AppError::BadRequest(
+            "Invalid or expired reset code".to_owned(),
+        ));
     }
     let password = hash_password(&dto.new_password)?;
     let user_id = user
