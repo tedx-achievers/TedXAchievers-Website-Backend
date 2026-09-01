@@ -45,15 +45,15 @@ fn preferred_role_value(role: &PreferredRole) -> &'static str {
 
 fn preferred_role_cap(role: &str) -> u64 {
     match role {
-        "technical" => 5,
-        "videography" => 5,
-        "photography" => 5,
-        "content" => 10,
-        "protocol_and_ushering" => 6,
-        "welfare" => 5,
-        "graphic_and_design" => 4,
-        "venue_and_decoration" => 5,
-        "partnership_and_sponsorship" => 3,
+        "technical" => 6,
+        "videography" => 6,
+        "photography" => 6,
+        "content" => 12,
+        "protocol_and_ushering" => 7,
+        "welfare" => 6,
+        "graphic_and_design" => 5,
+        "venue_and_decoration" => 6,
+        "partnership_and_sponsorship" => 4,
         _ => 0,
     }
 }
