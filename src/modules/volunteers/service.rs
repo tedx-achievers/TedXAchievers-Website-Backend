@@ -24,6 +24,8 @@ const COLLECTION: &str = "volunteer_applications";
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicVolunteerStatus {
+    pub name: String,
+    pub department: String,
     pub reference_code: String,
     pub status: String,
     pub preferred_role: String,
@@ -136,6 +138,8 @@ pub async fn get_my_status(db: &Database, email: &str) -> Result<PublicVolunteer
         })?
         .ok_or_else(|| AppError::NotFound("No application found for this email".to_owned()))?;
     Ok(PublicVolunteerStatus {
+        name: application.full_name,
+        department: application.department,
         reference_code: application.reference_code,
         status: status_value(&application.status).to_owned(),
         preferred_role: preferred_role_value(&application.preferred_role).to_owned(),
