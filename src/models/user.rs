@@ -19,20 +19,25 @@ pub struct User {
     #[serde(default, rename = "emailVerificationCodeHash")]
     pub email_verification_code_hash: Option<String>,
     #[serde(default, rename = "emailVerificationCodeExpiry")]
+    #[serde(with = "crate::utils::datetime::optional_bson_datetime")]
     pub email_verification_code_expiry: Option<DateTime<Utc>>,
     #[serde(default, rename = "emailVerificationAttempts")]
     pub email_verification_attempts: u32,
     #[serde(default, rename = "passwordResetCodeHash")]
     pub password_reset_code_hash: Option<String>,
     #[serde(default, rename = "passwordResetCodeExpiry")]
+    #[serde(with = "crate::utils::datetime::optional_bson_datetime")]
     pub password_reset_code_expiry: Option<DateTime<Utc>>,
     #[serde(default, rename = "passwordResetAttempts")]
     pub password_reset_attempts: u32,
     #[serde(default, rename = "setPasswordToken")]
     pub set_password_token: Option<String>,
     #[serde(default, rename = "setPasswordTokenExpiry")]
+    #[serde(with = "crate::utils::datetime::optional_bson_datetime")]
     pub set_password_token_expiry: Option<DateTime<Utc>>,
+    #[serde(with = "crate::utils::datetime::optional_bson_datetime")]
     pub created_at: Option<DateTime<Utc>>,
+    #[serde(with = "crate::utils::datetime::optional_bson_datetime")]
     pub updated_at: Option<DateTime<Utc>>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]

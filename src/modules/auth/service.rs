@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration as StdDuration, Instant},
+};
 
 use chrono::{Duration, Utc};
 use mongodb::{bson::doc, Database};
@@ -17,11 +20,14 @@ use crate::{
         jwt::{sign_access_token, sign_refresh_token, verify_refresh_token},
     },
 };
-use dashmap::DashMap;
+use dashmap::{mapref::entry::Entry, DashMap};
 use rand::Rng;
 use tokio::sync::mpsc::Sender;
 
-use super::dto::{ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto, VerifyEmailDto};
+use super::dto::{
+    ForgotPasswordDto, LoginDto, RegisterDto, ResendVerificationDto, ResetPasswordDto,
+    VerifyEmailDto,
+};
 use crate::modules::tickets::dto::SetPasswordDto;
 
 const USERS: &str = "users";
@@ -241,6 +247,83 @@ pub async fn verify_email(db: &Database, dto: VerifyEmailDto) -> Result<(), AppE
         ));
     }
     users.update_one(doc! { "_id": user.id }, doc! { "$set": { "isVerified": true, "emailVerificationCodeHash": mongodb::bson::Bson::Null, "emailVerificationCodeExpiry": mongodb::bson::Bson::Null, "emailVerificationAttempts": 0_i64, "updatedAt": mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()) } }, None).await.map_err(database_error)?;
+    Ok(())
+}
+
+pub async fn resend_verification(
+    db: &Database,
+    config: &Arc<Config>,
+    email_queue: &Sender<crate::utils::email::EmailJob>,
+    resend_cooldowns: &DashMap<String, Instant>,
+    dto: ResendVerificationDto,
+) -> Result<(), AppError> {
+    const RESEND_COOLDOWN: StdDuration = StdDuration::from_secs(60);
+    let email = dto.email.trim().to_lowercase();
+    let users = db.collection::<User>(USERS);
+    let Some(user) = users
+        .find_one(doc! { "email": &email }, None)
+        .await
+        .map_err(database_error)?
+    else {
+        return Ok(());
+    };
+    if user.is_verified {
+        return Ok(());
+    }
+    let cooldown_started_at = Instant::now();
+    match resend_cooldowns.entry(email.clone()) {
+        Entry::Occupied(mut entry) => {
+            if entry.get().elapsed() < RESEND_COOLDOWN {
+                return Ok(());
+            }
+            entry.insert(cooldown_started_at);
+        }
+        Entry::Vacant(entry) => {
+            entry.insert(cooldown_started_at);
+        }
+    }
+    let user_id = user
+        .id
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("User is missing an id")))?;
+    let verification_code = generate_code();
+    let now = Utc::now();
+    users
+        .update_one(
+            doc! { "_id": user_id },
+            doc! {
+                "$set": {
+                    "emailVerificationCodeHash": hash_password(&verification_code)?,
+                    "emailVerificationCodeExpiry": mongodb::bson::DateTime::from_millis((now + Duration::minutes(CODE_TTL_MINUTES)).timestamp_millis()),
+                    "emailVerificationAttempts": 0_i64,
+                    "updatedAt": mongodb::bson::DateTime::from_millis(now.timestamp_millis())
+                }
+            },
+            None,
+        )
+        .await
+        .map_err(|error| {
+            resend_cooldowns.remove(&email);
+            database_error(error)
+        })?;
+    crate::utils::email::enqueue(
+        email_queue,
+        crate::utils::email::EmailJob {
+            to_email: email.clone(),
+            to_name: user.name.clone(),
+            subject: "Your TEDxAchievers verification code".to_owned(),
+            html: crate::utils::email::auth_code_email_html(
+                &user.name,
+                &config.frontend_url,
+                "Verify your email",
+                "Use the secure code below to verify your TEDxAchievers account.",
+                &verification_code,
+                "Verify your email",
+                &format!("{}/verify-email", config.frontend_url.trim_end_matches('/')),
+                CODE_TTL_MINUTES as u32,
+            ),
+        },
+    );
+    info!(email = %email, "Verification email resent");
     Ok(())
 }
 

@@ -16,7 +16,9 @@ pub struct VolunteerApplication {
     pub preferred_role: PreferredRole,
     pub motivation: String,
     pub status: ApplicationStatus,
+    #[serde(with = "crate::utils::datetime::bson_datetime")]
     pub created_at: DateTime<Utc>,
+    #[serde(with = "crate::utils::datetime::bson_datetime")]
     pub updated_at: DateTime<Utc>,
 }
 

@@ -8,6 +8,8 @@ pub struct RefreshToken {
     pub id: Option<ObjectId>,
     pub token: String,
     pub user_id: ObjectId,
+    #[serde(with = "crate::utils::datetime::bson_datetime")]
     pub expires_at: DateTime<Utc>,
+    #[serde(with = "crate::utils::datetime::optional_bson_datetime")]
     pub created_at: Option<DateTime<Utc>>,
 }

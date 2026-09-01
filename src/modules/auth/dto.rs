@@ -34,6 +34,13 @@ pub struct VerifyEmailDto {
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 #[serde(rename_all = "camelCase")]
+pub struct ResendVerificationDto {
+    #[validate(email)]
+    pub email: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+#[serde(rename_all = "camelCase")]
 pub struct ForgotPasswordDto {
     #[validate(email)]
     pub email: String,

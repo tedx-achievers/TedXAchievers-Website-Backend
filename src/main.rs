@@ -5,7 +5,7 @@ use axum::{
     Json, Router,
 };
 use dashmap::DashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
@@ -27,6 +27,7 @@ pub struct AppState {
     pub db: mongodb::Database,
     pub cache: Arc<DashMap<String, middleware::auth::CachedAuthUser>>,
     pub rate_limits: Arc<DashMap<String, std::collections::VecDeque<std::time::Instant>>>,
+    pub verification_resends: Arc<DashMap<String, Instant>>,
     pub email_queue: tokio::sync::mpsc::Sender<utils::email::EmailJob>,
     pub config: Arc<Config>,
 }
@@ -35,6 +36,19 @@ async fn not_found() -> impl IntoResponse {
         StatusCode::NOT_FOUND,
         Json(serde_json::json!({"success": false, "message": "Route not found"})),
     )
+}
+
+async fn log_failed_requests(
+    request: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let response = next.run(request).await;
+    if response.status().is_server_error() {
+        tracing::error!(%method, %uri, status = %response.status(), "HTTP request returned server error");
+    }
+    response
 }
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
@@ -61,6 +75,7 @@ async fn main() -> Result<(), AppError> {
         db,
         cache: Arc::new(DashMap::new()),
         rate_limits: Arc::new(DashMap::new()),
+        verification_resends: Arc::new(DashMap::new()),
         email_queue,
         config: Arc::clone(&config),
     });
@@ -94,6 +109,7 @@ async fn main() -> Result<(), AppError> {
             middleware_state,
             middleware::rate_limit::request_rate_limit,
         ))
+        .layer(axum::middleware::from_fn(log_failed_requests))
         .layer(TraceLayer::new_for_http());
     info!(
         "TEDxAchievers API listening on {}",

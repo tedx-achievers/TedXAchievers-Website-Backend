@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -25,6 +26,7 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        error!(error = ?self, message = %self, "API request failed");
         let (status, message) = match self {
             Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_owned()),

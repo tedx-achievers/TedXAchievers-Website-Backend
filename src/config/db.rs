@@ -1,10 +1,92 @@
 use crate::config::Config;
 use mongodb::{
-    bson::doc,
+    bson::{doc, Document},
     options::{ClientOptions, IndexOptions},
     Client, Database, IndexModel,
 };
 use tracing::info;
+
+const DATE_FIELDS: &[(&str, &[&str])] = &[
+    (
+        "users",
+        &[
+            "createdAt",
+            "updatedAt",
+            "emailVerificationCodeExpiry",
+            "passwordResetCodeExpiry",
+            "setPasswordTokenExpiry",
+        ],
+    ),
+    ("tickets", &["createdAt", "updatedAt", "checkedInAt"]),
+    ("refresh_tokens", &["expiresAt", "createdAt"]),
+    ("volunteer_applications", &["createdAt", "updatedAt"]),
+];
+
+async fn migrate_date_field(
+    database: &Database,
+    collection_name: &str,
+    field: &str,
+) -> Result<(), mongodb::error::Error> {
+    let collection = database.collection::<Document>(collection_name);
+    let mut set = Document::new();
+    set.insert(
+        field,
+        doc! {
+            "$convert": {
+                "input": format!("${field}"),
+                "to": "date",
+                "onError": format!("${field}"),
+                "onNull": mongodb::bson::Bson::Null,
+            }
+        },
+    );
+    let mut update = Document::new();
+    update.insert("$set", set);
+    let mut filter = Document::new();
+    filter.insert(field, doc! { "$type": "string" });
+    let result = collection.update_many(filter, vec![update], None).await?;
+    if result.modified_count > 0 {
+        info!(
+            collection = collection_name,
+            field,
+            modified = result.modified_count,
+            "Converted legacy date strings"
+        );
+    }
+    Ok(())
+}
+
+async fn verify_date_fields(database: &Database) -> Result<(), mongodb::error::Error> {
+    for (collection_name, fields) in DATE_FIELDS {
+        let collection = database.collection::<Document>(collection_name);
+        for field in *fields {
+            let mut filter = Document::new();
+            filter.insert(*field, doc! { "$type": "string" });
+            let remaining = collection.count_documents(filter, None).await?;
+            if remaining > 0 {
+                panic!(
+                    "Date migration left {remaining} string value(s) in {collection_name}.{field}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn migrate_and_verify_dates(database: &Database) {
+    for (collection_name, fields) in DATE_FIELDS {
+        for field in *fields {
+            migrate_date_field(database, collection_name, field)
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("Failed to migrate {collection_name}.{field} to BSON DateTime: {error}")
+                });
+        }
+    }
+    verify_date_fields(database)
+        .await
+        .unwrap_or_else(|error| panic!("Failed to verify MongoDB date fields: {error}"));
+}
 
 pub async fn connect_db(config: &Config) -> Database {
     let options = ClientOptions::parse(&config.mongodb_uri)
@@ -95,6 +177,7 @@ pub async fn connect_db(config: &Config) -> Database {
             .await
             .unwrap_or_else(|error| panic!("Failed to create indexes for {collection}: {error}"));
     }
+    migrate_and_verify_dates(&database).await;
     let applications = database.collection::<mongodb::bson::Document>("volunteer_applications");
     let counters = database.collection::<mongodb::bson::Document>("volunteer_role_counters");
     let preferred_roles = applications

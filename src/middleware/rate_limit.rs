@@ -38,6 +38,7 @@ fn sensitive_auth_path(path: &str) -> bool {
         path,
         "/api/auth/login"
             | "/api/auth/verify-email"
+            | "/api/auth/resend-verification"
             | "/api/auth/forgot-password"
             | "/api/auth/reset-password"
     )

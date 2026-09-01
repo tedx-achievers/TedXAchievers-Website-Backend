@@ -1,5 +1,8 @@
 use super::{
-    dto::{ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto, VerifyEmailDto},
+    dto::{
+        ForgotPasswordDto, LoginDto, RegisterDto, ResendVerificationDto, ResetPasswordDto,
+        VerifyEmailDto,
+    },
     service,
 };
 use crate::modules::tickets::dto::SetPasswordDto;
@@ -131,6 +134,28 @@ pub async fn verify_email_handler(
         axum::Json(json!({ "message": "Email verified successfully" })),
     )
         .into_response())
+}
+
+pub async fn resend_verification_handler(
+    State(state): State<Arc<AppState>>,
+    Json(mut body): Json<ResendVerificationDto>,
+) -> Result<impl IntoResponse, AppError> {
+    body.email = body.email.trim().to_lowercase();
+    if let Err(error) = body.validate() {
+        return Ok(validation_response(error));
+    }
+    service::resend_verification(
+        &state.db,
+        &state.config,
+        &state.email_queue,
+        &state.verification_resends,
+        body,
+    )
+    .await?;
+    Ok(axum::Json(json!({
+        "message": "If that email requires verification, a new verification code has been sent"
+    }))
+    .into_response())
 }
 pub async fn forgot_password_handler(
     State(state): State<Arc<AppState>>,

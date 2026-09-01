@@ -16,8 +16,11 @@ pub struct Ticket {
     pub amount_kobo: u64,
     #[serde(default)]
     pub checked_in: bool,
+    #[serde(with = "crate::utils::datetime::optional_bson_datetime")]
     pub checked_in_at: Option<DateTime<Utc>>,
+    #[serde(with = "crate::utils::datetime::optional_bson_datetime")]
     pub created_at: Option<DateTime<Utc>>,
+    #[serde(with = "crate::utils::datetime::optional_bson_datetime")]
     pub updated_at: Option<DateTime<Utc>>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
