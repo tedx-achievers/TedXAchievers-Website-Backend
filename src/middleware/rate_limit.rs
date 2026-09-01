@@ -6,7 +6,7 @@ use std::{
 use axum::{
     body::Body,
     extract::ConnectInfo,
-    http::{Request, StatusCode},
+    http::{Method, Request, StatusCode},
     middleware::Next,
     response::Response,
 };
@@ -19,7 +19,7 @@ const GLOBAL_MAX_REQUESTS: usize = 120;
 const TICKET_WINDOW: Duration = Duration::from_secs(60);
 const TICKET_MAX_REQUESTS: usize = 62;
 const SENSITIVE_WINDOW: Duration = Duration::from_secs(12 * 60 * 60);
-const SENSITIVE_MAX_REQUESTS: usize = 15;
+const SENSITIVE_MAX_REQUESTS: usize = 30;
 
 fn ticket_scan_path(path: &str) -> bool {
     let mut segments = path.split('/');
@@ -49,6 +49,10 @@ pub async fn request_rate_limit(
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    if request.method() == Method::OPTIONS {
+        return next.run(request).await;
+    }
+
     let ip = request
         .headers()
         .get("x-forwarded-for")
