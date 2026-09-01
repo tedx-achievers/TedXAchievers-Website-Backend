@@ -32,7 +32,7 @@ fn code() -> String {
 async fn existing_paid(db: &Database, user_id: ObjectId) -> Result<bool, AppError> {
     Ok(db
         .collection::<Ticket>(TICKETS)
-        .find_one(doc! {"user_id":user_id,"status":"paid"}, None)
+        .find_one(doc! {"userId":user_id,"status":"paid"}, None)
         .await
         .map_err(db_error)?
         .is_some())
@@ -82,7 +82,7 @@ pub async fn initiate_ticket(
         }
         if let Some(ticket) = db
             .collection::<Ticket>(TICKETS)
-            .find_one(doc! {"user_id":id,"status":"pending"}, None)
+            .find_one(doc! {"userId":id,"status":"pending"}, None)
             .await
             .map_err(db_error)?
         {
@@ -238,14 +238,14 @@ pub async fn verify_otp(
 pub async fn my_ticket(db: &Database, user_id: &str) -> Result<Ticket, AppError> {
     let id = ObjectId::parse_str(user_id).map_err(|_| AppError::Unauthorized)?;
     db.collection::<Ticket>(TICKETS)
-        .find_one(doc! {"user_id":id,"status":"paid"}, None)
+        .find_one(doc! {"userId":id,"status":"paid"}, None)
         .await
         .map_err(db_error)?
         .ok_or_else(|| AppError::NotFound("No paid ticket found".to_owned()))
 }
 pub async fn verify_ticket(db: &Database, ticket_code: &str) -> Result<Ticket, AppError> {
     db.collection::<Ticket>(TICKETS)
-        .find_one(doc! {"ticket_code":ticket_code}, None)
+        .find_one(doc! {"ticketCode":ticket_code}, None)
         .await
         .map_err(db_error)?
         .ok_or_else(|| AppError::NotFound("Ticket not found".to_owned()))
@@ -260,7 +260,7 @@ pub async fn checkin(db: &Database, ticket_code: &str) -> Result<Ticket, AppErro
             "Ticket has already been checked in".to_owned(),
         ));
     }
-    db.collection::<Ticket>(TICKETS).find_one_and_update(doc!{"_id":ticket.id,"checked_in":false},doc!{"$set":{"checked_in":true,"checked_in_at":mongodb::bson::DateTime::from_chrono(Utc::now()),"updated_at":mongodb::bson::DateTime::from_chrono(Utc::now())}},None).await.map_err(db_error)?.ok_or_else(||AppError::Conflict("Ticket has already been checked in".to_owned()))
+    db.collection::<Ticket>(TICKETS).find_one_and_update(doc!{"_id":ticket.id,"checkedIn":false},doc!{"$set":{"checkedIn":true,"checkedInAt":mongodb::bson::DateTime::from_chrono(Utc::now()),"updatedAt":mongodb::bson::DateTime::from_chrono(Utc::now())}},None).await.map_err(db_error)?.ok_or_else(||AppError::Conflict("Ticket has already been checked in".to_owned()))
 }
 pub async fn verify_ticket_payment(
     db: &Database,
@@ -272,7 +272,7 @@ pub async fn verify_ticket_payment(
     }
     let tickets = db.collection::<Ticket>(TICKETS);
     let ticket = tickets
-        .find_one(doc! {"payment_ref":reference}, None)
+        .find_one(doc! {"paymentRef":reference}, None)
         .await
         .map_err(db_error)?
         .ok_or_else(|| AppError::NotFound("Payment reference not found".to_owned()))?;
@@ -281,7 +281,7 @@ pub async fn verify_ticket_payment(
     }
     let id = ticket.user_id;
     let qr = crate::utils::qr::generate_qr_base64(&ticket.ticket_code)?;
-    tickets.update_one(doc!{"_id":ticket.id},doc!{"$set":{"status":"paid","qr_code":&qr,"updated_at":mongodb::bson::DateTime::from_chrono(Utc::now())}},None).await.map_err(db_error)?;
+    tickets.update_one(doc!{"_id":ticket.id},doc!{"$set":{"status":"paid","qrCode":&qr,"updatedAt":mongodb::bson::DateTime::from_chrono(Utc::now())}},None).await.map_err(db_error)?;
     let token = Uuid::new_v4().to_string();
     db.collection::<User>(USERS).update_one(doc!{"_id":id},doc!{"$set":{"setPasswordToken":token,"setPasswordTokenExpiry":mongodb::bson::DateTime::from_chrono(Utc::now()+Duration::days(7))}},None).await.map_err(db_error)?;
     Ok(())

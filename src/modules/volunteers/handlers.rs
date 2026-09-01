@@ -1,5 +1,5 @@
 use super::{
-    dto::{ApplyVolunteerDto, CheckStatusDto, UpdateApplicationStatusDto},
+    dto::{ApplyVolunteerDto, ChangePreferredRoleDto, CheckStatusDto, UpdateApplicationStatusDto},
     service,
 };
 use crate::{errors::AppError, middleware::role::RequireAdmin, AppState};
@@ -112,6 +112,18 @@ pub async fn my_status_handler(
     Query(params): Query<CheckStatusDto>,
 ) -> Result<impl IntoResponse, AppError> {
     let application = service::get_my_status(&state.db, &params.email).await?;
+    Ok((StatusCode::OK, Json(application)).into_response())
+}
+
+pub async fn change_preferred_role_handler(
+    State(state): State<Arc<AppState>>,
+    Json(mut body): Json<ChangePreferredRoleDto>,
+) -> Result<impl IntoResponse, AppError> {
+    body.email = body.email.trim().to_lowercase();
+    if let Err(error) = body.validate() {
+        return Ok(validation_response(error));
+    }
+    let application = service::change_preferred_role(&state.db, body).await?;
     Ok((StatusCode::OK, Json(application)).into_response())
 }
 

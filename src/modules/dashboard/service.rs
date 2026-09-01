@@ -155,7 +155,7 @@ async fn find_volunteer(
             doc! {"email": email.trim().to_lowercase()},
             Some(
                 FindOneOptions::builder()
-                    .sort(doc! {"created_at": -1})
+                    .sort(doc! {"createdAt": -1})
                     .build(),
             ),
         )
@@ -172,7 +172,7 @@ pub async fn get_dashboard(
     let (id, user) = find_user(db, user_id).await?;
     let ticket = db
         .collection::<Ticket>(TICKETS)
-        .find_one(doc! {"user_id": id, "status": "paid"}, None)
+        .find_one(doc! {"userId": id, "status": "paid"}, None)
         .await
         .map_err(db_error)?
         .map(ticket);
@@ -201,7 +201,7 @@ pub async fn update_profile(
         return Err(AppError::BadRequest("No fields to update".to_owned()));
     }
     let (id, _) = find_user(db, user_id).await?;
-    let mut set = doc! {"updated_at": mongodb::bson::DateTime::from_chrono(Utc::now())};
+    let mut set = doc! {"updatedAt": mongodb::bson::DateTime::from_chrono(Utc::now())};
     if let Some(value) = name {
         set.insert("name", value);
     }
@@ -228,7 +228,7 @@ pub async fn update_profile(
 pub async fn get_ticket(db: &Database, user_id: &str) -> Result<TicketResponse, AppError> {
     let id = ObjectId::parse_str(user_id).map_err(|_| AppError::Unauthorized)?;
     db.collection::<Ticket>(TICKETS)
-        .find_one(doc! {"user_id": id, "status": "paid"}, None)
+        .find_one(doc! {"userId": id, "status": "paid"}, None)
         .await
         .map_err(db_error)?
         .map(ticket)

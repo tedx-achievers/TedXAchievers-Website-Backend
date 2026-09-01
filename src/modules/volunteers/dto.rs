@@ -32,3 +32,11 @@ pub struct UpdateApplicationStatusDto {
 pub struct CheckStatusDto {
     pub email: String,
 }
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangePreferredRoleDto {
+    #[validate(email)]
+    pub email: String,
+    pub preferred_role: PreferredRole,
+}

@@ -126,7 +126,7 @@ pub async fn connect_db(config: &Config) -> Database {
     };
     let normal = |field: &str| IndexModel::builder().keys(doc! { field: 1 }).build();
     let ttl = IndexModel::builder()
-        .keys(doc! { "expires_at": 1 })
+        .keys(doc! { "expiresAt": 1 })
         .options(
             IndexOptions::builder()
                 .expire_after(std::time::Duration::from_secs(0))
@@ -138,29 +138,29 @@ pub async fn connect_db(config: &Config) -> Database {
             "users",
             vec![
                 unique("email"),
-                unique_sparse_named("set_password_token", "user_set_password_token_unique"),
+                unique_sparse_named("setPasswordToken", "user_set_password_token_unique"),
             ],
         ),
         (
             "tickets",
             vec![
-                unique("ticket_code"),
-                unique("payment_ref"),
-                IndexModel::builder().keys(doc! { "user_id": 1 }).build(),
+                unique("ticketCode"),
+                unique("paymentRef"),
+                IndexModel::builder().keys(doc! { "userId": 1 }).build(),
                 normal("status"),
             ],
         ),
         (
             "refresh_tokens",
-            vec![unique("token"), normal("user_id"), ttl],
+            vec![unique("token"), normal("userId"), ttl],
         ),
         (
             "volunteer_applications",
             vec![
                 unique_named("email", "volunteer_email_unique"),
-                unique_sparse_named("reference_code", "volunteer_reference_unique"),
+                unique_sparse_named("referenceCode", "volunteer_reference_unique"),
                 normal("department"),
-                normal("preferred_role"),
+                normal("preferredRole"),
                 normal("status"),
             ],
         ),
@@ -178,34 +178,6 @@ pub async fn connect_db(config: &Config) -> Database {
             .unwrap_or_else(|error| panic!("Failed to create indexes for {collection}: {error}"));
     }
     migrate_and_verify_dates(&database).await;
-    let applications = database.collection::<mongodb::bson::Document>("volunteer_applications");
-    let counters = database.collection::<mongodb::bson::Document>("volunteer_role_counters");
-    let preferred_roles = applications
-        .distinct("preferred_role", None, None)
-        .await
-        .unwrap_or_else(|error| panic!("Failed to read volunteer preferred roles: {error}"));
-    for preferred_role in preferred_roles {
-        if let mongodb::bson::Bson::String(preferred_role) = preferred_role {
-            let count = applications
-                .count_documents(doc! { "preferred_role": &preferred_role }, None)
-                .await
-                .unwrap_or_else(|error| {
-                    panic!("Failed to count volunteer applications for {preferred_role}: {error}")
-                });
-            counters
-                .update_one(
-                    doc! { "_id": &preferred_role },
-                    doc! { "$set": { "count": count as i64 } },
-                    mongodb::options::UpdateOptions::builder()
-                        .upsert(true)
-                        .build(),
-                )
-                .await
-                .unwrap_or_else(|error| {
-                    panic!("Failed to synchronize volunteer role counter for {preferred_role}: {error}")
-                });
-        }
-    }
     info!("MongoDB connected and indexes created");
     database
 }

@@ -101,7 +101,7 @@ pub async fn webhook(
     if let Some(ticket) = state
         .db
         .collection::<crate::models::ticket::Ticket>("tickets")
-        .find_one(mongodb::bson::doc! {"payment_ref":reference}, None)
+        .find_one(mongodb::bson::doc! {"paymentRef":reference}, None)
         .await
         .map_err(|_| AppError::Internal(anyhow::anyhow!("Ticket lookup failed")))?
     {

@@ -1,13 +1,13 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use mongodb::{
     bson::doc,
-    options::{FindOneAndUpdateOptions, FindOneOptions, FindOptions, ReturnDocument},
+    options::{FindOneOptions, FindOptions},
     Database,
 };
 use tracing::{error, info};
 use uuid::Uuid;
 
-use super::dto::{ApplyVolunteerDto, UpdateApplicationStatusDto};
+use super::dto::{ApplyVolunteerDto, ChangePreferredRoleDto, UpdateApplicationStatusDto};
 use crate::{
     config::Config,
     errors::AppError,
@@ -19,7 +19,16 @@ use crate::{
 use std::sync::Arc;
 
 const COLLECTION: &str = "volunteer_applications";
-const ROLE_COUNTERS: &str = "volunteer_role_counters";
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicVolunteerStatus {
+    pub reference_code: String,
+    pub status: String,
+    pub preferred_role: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
 
 fn status_value(status: &ApplicationStatus) -> &'static str {
     match status {
@@ -40,21 +49,6 @@ fn preferred_role_value(role: &PreferredRole) -> &'static str {
         PreferredRole::GraphicAndDesign => "graphic_and_design",
         PreferredRole::VenueAndDecoration => "venue_and_decoration",
         PreferredRole::PartnershipAndSponsorship => "partnership_and_sponsorship",
-    }
-}
-
-fn preferred_role_cap(role: &str) -> u64 {
-    match role {
-        "technical" => 6,
-        "videography" => 6,
-        "photography" => 6,
-        "content" => 12,
-        "protocol_and_ushering" => 7,
-        "welfare" => 6,
-        "graphic_and_design" => 5,
-        "venue_and_decoration" => 6,
-        "partnership_and_sponsorship" => 4,
-        _ => 0,
     }
 }
 
@@ -93,14 +87,7 @@ pub async fn apply(
         now,
         Uuid::new_v4().to_string(),
     );
-    let preferred_role = preferred_role_value(&application.preferred_role);
-    if !claim_role_slot(db, preferred_role).await? {
-        return Err(AppError::Conflict(
-            "This preferred role has reached its application limit".to_owned(),
-        ));
-    }
     if let Err(error) = collection.insert_one(&application, None).await {
-        release_role_slot(db, preferred_role).await;
         if error.to_string().contains("E11000") {
             return Err(AppError::Conflict(
                 "An application already exists for this email".to_owned(),
@@ -113,73 +100,14 @@ pub async fn apply(
     Ok(application)
 }
 
-async fn claim_role_slot(db: &Database, preferred_role: &str) -> Result<bool, AppError> {
-    let role_cap = preferred_role_cap(preferred_role);
-    let applications = db.collection::<VolunteerApplication>(COLLECTION);
-    let existing_count = applications
-        .count_documents(doc! { "preferred_role": preferred_role }, None)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
-    if existing_count >= role_cap {
-        return Ok(false);
-    }
-    let counters = db.collection::<mongodb::bson::Document>(ROLE_COUNTERS);
-    let options = FindOneAndUpdateOptions::builder()
-        .upsert(true)
-        .return_document(ReturnDocument::After)
-        .build();
-    let result = counters
-        .find_one_and_update(
-            doc! { "_id": preferred_role, "count": { "$lt": role_cap as i64 } },
-            doc! { "$inc": { "count": 1_i64 } },
-            options,
-        )
-        .await;
-    match result {
-        Ok(Some(_)) => Ok(true),
-        Ok(None) => Ok(false),
-        Err(error) if error.to_string().contains("E11000") => {
-            let retry_options = FindOneAndUpdateOptions::builder()
-                .return_document(ReturnDocument::After)
-                .build();
-            counters
-                .find_one_and_update(
-                    doc! { "_id": preferred_role, "count": { "$lt": role_cap as i64 } },
-                    doc! { "$inc": { "count": 1_i64 } },
-                    retry_options,
-                )
-                .await
-                .map(|result| result.is_some())
-                .map_err(|retry_error| AppError::Internal(anyhow::anyhow!(retry_error)))
-        }
-        Err(error) => {
-            error!(%error, preferred_role, "Failed to claim volunteer role slot");
-            Err(AppError::Internal(anyhow::anyhow!(error)))
-        }
-    }
-}
-
-async fn release_role_slot(db: &Database, preferred_role: &str) {
-    if let Err(error) = db
-        .collection::<mongodb::bson::Document>(ROLE_COUNTERS)
-        .update_one(
-            doc! { "_id": preferred_role, "count": { "$gt": 0 } },
-            doc! { "$inc": { "count": -1_i64 } },
-            None,
-        )
-        .await
-    {
-        error!(%error, "Failed to release volunteer department slot");
-    }
-}
-
-pub async fn get_my_status(db: &Database, email: &str) -> Result<VolunteerApplication, AppError> {
-    db.collection::<VolunteerApplication>(COLLECTION)
+pub async fn get_my_status(db: &Database, email: &str) -> Result<PublicVolunteerStatus, AppError> {
+    let application = db
+        .collection::<VolunteerApplication>(COLLECTION)
         .find_one(
             doc! { "email": email.trim().to_lowercase() },
             Some(
                 FindOneOptions::builder()
-                    .sort(doc! { "created_at": -1 })
+                    .sort(doc! { "createdAt": -1 })
                     .build(),
             ),
         )
@@ -188,6 +116,48 @@ pub async fn get_my_status(db: &Database, email: &str) -> Result<VolunteerApplic
             error!(%error, "Failed to find volunteer application status");
             AppError::Internal(anyhow::anyhow!(error))
         })?
+        .ok_or_else(|| AppError::NotFound("No application found for this email".to_owned()))?;
+    Ok(PublicVolunteerStatus {
+        reference_code: application.reference_code,
+        status: status_value(&application.status).to_owned(),
+        preferred_role: preferred_role_value(&application.preferred_role).to_owned(),
+        created_at: application.created_at,
+        updated_at: application.updated_at,
+    })
+}
+
+pub async fn change_preferred_role(
+    db: &Database,
+    dto: ChangePreferredRoleDto,
+) -> Result<VolunteerApplication, AppError> {
+    let collection = db.collection::<VolunteerApplication>(COLLECTION);
+    let email = dto.email.trim().to_lowercase();
+    let updated_at = Utc::now();
+    let result = collection
+        .update_one(
+            doc! { "email": &email },
+            doc! {
+                "$set": {
+                    "preferredRole": preferred_role_value(&dto.preferred_role),
+                    "updatedAt": mongodb::bson::DateTime::from_millis(updated_at.timestamp_millis())
+                }
+            },
+            None,
+        )
+        .await
+        .map_err(|error| {
+            error!(%error, "Failed to update volunteer preferred role");
+            AppError::Internal(anyhow::anyhow!(error))
+        })?;
+    if result.matched_count == 0 {
+        return Err(AppError::NotFound(
+            "No application found for this email".to_owned(),
+        ));
+    }
+    collection
+        .find_one(doc! { "email": email }, None)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?
         .ok_or_else(|| AppError::NotFound("No application found for this email".to_owned()))
 }
 
@@ -203,9 +173,7 @@ pub async fn list_applications(
         .collection::<VolunteerApplication>(COLLECTION)
         .find(
             filter,
-            FindOptions::builder()
-                .sort(doc! { "created_at": 1 })
-                .build(),
+            FindOptions::builder().sort(doc! { "createdAt": 1 }).build(),
         )
         .await
         .map_err(|error| {
@@ -247,7 +215,7 @@ pub async fn update_status(
     collection
         .update_one(
             doc! { "_id": application_id },
-            doc! { "$set": { "status": status_value(&dto.status), "updated_at": mongodb::bson::DateTime::from_millis(updated_at.timestamp_millis()) } },
+            doc! { "$set": { "status": status_value(&dto.status), "updatedAt": mongodb::bson::DateTime::from_millis(updated_at.timestamp_millis()) } },
             None,
         )
         .await
@@ -283,7 +251,7 @@ pub async fn update_status(
                 users
                     .update_one(
                         doc! { "_id": id },
-                        doc! { "$set": { "role": "volunteer", "updated_at": mongodb::bson::DateTime::from_chrono(Utc::now()) } },
+                        doc! { "$set": { "role": "volunteer", "updatedAt": mongodb::bson::DateTime::from_chrono(Utc::now()) } },
                         None,
                     )
                     .await
@@ -354,7 +322,7 @@ pub async fn update_status(
                         users
                             .update_one(
                                 doc! { "_id": id },
-                                doc! { "$set": { "role": "attendee", "updated_at": mongodb::bson::DateTime::from_chrono(Utc::now()) } },
+                                doc! { "$set": { "role": "attendee", "updatedAt": mongodb::bson::DateTime::from_chrono(Utc::now()) } },
                                 None,
                             )
                             .await
