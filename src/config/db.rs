@@ -167,10 +167,22 @@ pub async fn connect_db(config: &Config) -> Database {
     ];
     for (collection, models) in indexes {
         let collection_handle = database.collection::<mongodb::bson::Document>(collection);
+        if collection == "users" {
+            // The index name is reused for the camelCase replacement. Remove
+            // the legacy snake_case definition before creating the new index.
+            let _ = collection_handle
+                .drop_index("user_set_password_token_unique", None)
+                .await;
+        }
         if collection == "volunteer_applications" {
             // Older deployments created a non-unique email_1 index. Remove it
             // so the unique replacement below can be created on startup.
             let _ = collection_handle.drop_index("email_1", None).await;
+            // Remove the legacy snake_case index before creating the camelCase
+            // replacement with the same explicit name.
+            let _ = collection_handle
+                .drop_index("volunteer_reference_unique", None)
+                .await;
         }
         collection_handle
             .create_indexes(models, None)
