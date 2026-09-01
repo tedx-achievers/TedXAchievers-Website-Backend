@@ -17,6 +17,7 @@ use mongodb::{
     Database,
 };
 use rand::Rng;
+use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -181,6 +182,23 @@ async fn create_pending(
         .insert_one(&ticket, None)
         .await
         .map_err(db_error)?;
+    let audit_db = db.clone();
+    let audit_email = user.email.clone();
+    let audit_tier = format!("{:?}", ticket.tier);
+    let audit_amount = ticket.amount_kobo;
+    tokio::spawn(async move {
+        let _ = crate::utils::audit::log_event(
+            &audit_db,
+            "ticket.initiated",
+            Some(&audit_email),
+            json!({
+                "email": audit_email,
+                "tier": audit_tier,
+                "amountKobo": audit_amount
+            }),
+        )
+        .await;
+    });
     let checkout = squad::initiate_payment(
         &user.email,
         &user.name,
@@ -250,17 +268,79 @@ pub async fn verify_ticket(db: &Database, ticket_code: &str) -> Result<Ticket, A
         .map_err(db_error)?
         .ok_or_else(|| AppError::NotFound("Ticket not found".to_owned()))
 }
-pub async fn checkin(db: &Database, ticket_code: &str) -> Result<Ticket, AppError> {
-    let ticket = verify_ticket(db, ticket_code).await?;
+pub async fn checkin(
+    db: &Database,
+    ticket_code: &str,
+    volunteer_email: &str,
+) -> Result<Ticket, AppError> {
+    let ticket = match verify_ticket(db, ticket_code).await {
+        Ok(ticket) => ticket,
+        Err(error) => {
+            crate::utils::audit::log_event(
+                db,
+                "ticket.checkin_failed",
+                Some(volunteer_email),
+                json!({"ticketCode": ticket_code, "reason": "invalid_status"}),
+            )
+            .await?;
+            return Err(error);
+        }
+    };
     if ticket.status != TicketStatus::Paid {
+        crate::utils::audit::log_event(
+            db,
+            "ticket.checkin_failed",
+            Some(volunteer_email),
+            json!({"ticketCode": ticket_code, "reason": "invalid_status"}),
+        )
+        .await?;
         return Err(AppError::BadRequest("Ticket is not paid".to_owned()));
     }
     if ticket.checked_in {
+        crate::utils::audit::log_event(
+            db,
+            "ticket.checkin_failed",
+            Some(volunteer_email),
+            json!({"ticketCode": ticket_code, "reason": "already_checked_in"}),
+        )
+        .await?;
         return Err(AppError::Conflict(
             "Ticket has already been checked in".to_owned(),
         ));
     }
-    db.collection::<Ticket>(TICKETS).find_one_and_update(doc!{"_id":ticket.id,"checkedIn":false},doc!{"$set":{"checkedIn":true,"checkedInAt":mongodb::bson::DateTime::from_chrono(Utc::now()),"updatedAt":mongodb::bson::DateTime::from_chrono(Utc::now())}},None).await.map_err(db_error)?.ok_or_else(||AppError::Conflict("Ticket has already been checked in".to_owned()))
+    let checked_in_at = Utc::now();
+    let updated = db
+        .collection::<Ticket>(TICKETS)
+        .find_one_and_update(
+            doc! {"_id":ticket.id,"checkedIn":false},
+            doc! {"$set":{"checkedIn":true,"checkedInAt":mongodb::bson::DateTime::from_chrono(checked_in_at),"updatedAt":mongodb::bson::DateTime::from_chrono(checked_in_at)}},
+            None,
+        )
+        .await
+        .map_err(db_error)?;
+    let updated = match updated {
+        Some(ticket) => ticket,
+        None => {
+            crate::utils::audit::log_event(
+                db,
+                "ticket.checkin_failed",
+                Some(volunteer_email),
+                json!({"ticketCode": ticket_code, "reason": "already_checked_in"}),
+            )
+            .await?;
+            return Err(AppError::Conflict(
+                "Ticket has already been checked in".to_owned(),
+            ));
+        }
+    };
+    crate::utils::audit::log_event(
+        db,
+        "ticket.checkin",
+        Some(volunteer_email),
+        json!({"ticketCode": ticket_code, "checkedInAt": checked_in_at.to_rfc3339()}),
+    )
+    .await?;
+    Ok(updated)
 }
 pub async fn verify_ticket_payment(
     db: &Database,
@@ -284,5 +364,30 @@ pub async fn verify_ticket_payment(
     tickets.update_one(doc!{"_id":ticket.id},doc!{"$set":{"status":"paid","qrCode":&qr,"updatedAt":mongodb::bson::DateTime::from_chrono(Utc::now())}},None).await.map_err(db_error)?;
     let token = Uuid::new_v4().to_string();
     db.collection::<User>(USERS).update_one(doc!{"_id":id},doc!{"$set":{"setPasswordToken":token,"setPasswordTokenExpiry":mongodb::bson::DateTime::from_chrono(Utc::now()+Duration::days(7))}},None).await.map_err(db_error)?;
+    if let Ok(Some(user)) = db
+        .collection::<User>(USERS)
+        .find_one(doc! {"_id": id}, None)
+        .await
+    {
+        let audit_db = db.clone();
+        let audit_email = user.email;
+        let audit_ticket_code = ticket.ticket_code;
+        let audit_tier = format!("{:?}", ticket.tier);
+        let audit_amount = ticket.amount_kobo;
+        tokio::spawn(async move {
+            let _ = crate::utils::audit::log_event(
+                &audit_db,
+                "ticket.paid",
+                Some(&audit_email),
+                json!({
+                    "ticketCode": audit_ticket_code,
+                    "tier": audit_tier,
+                    "amountKobo": audit_amount,
+                    "userEmail": audit_email
+                }),
+            )
+            .await;
+        });
+    }
     Ok(())
 }

@@ -1,5 +1,6 @@
 use std::fmt::Write;
 
+use chrono::{DateTime, Utc};
 use mongodb::{
     bson::{doc, Document, Regex},
     options::FindOptions,
@@ -9,7 +10,10 @@ use tracing::info;
 
 use crate::{
     errors::AppError,
-    models::{ticket::Ticket, user::User, volunteer_application::VolunteerApplication},
+    models::{
+        audit_log::AuditLog, ticket::Ticket, user::User,
+        volunteer_application::VolunteerApplication,
+    },
 };
 
 use super::dto::{
@@ -20,6 +24,7 @@ use super::dto::{
 const USERS: &str = "users";
 const TICKETS: &str = "tickets";
 const VOLUNTEERS: &str = "volunteer_applications";
+const AUDIT_LOGS: &str = "audit_logs";
 
 fn database_error(error: impl std::fmt::Display) -> AppError {
     AppError::Internal(anyhow::anyhow!(error.to_string()))
@@ -379,6 +384,57 @@ pub async fn list_volunteers(
         data.push(cursor.deserialize_current().map_err(database_error)?);
     }
     info!(page, per_page, total, "Admin volunteer list loaded");
+    Ok(PaginatedResponse {
+        data,
+        total,
+        page,
+        per_page,
+        total_pages: pages(total, per_page),
+    })
+}
+
+pub async fn get_audit_logs(
+    db: &Database,
+    event_type: Option<String>,
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+    page: u64,
+    per_page: u64,
+) -> Result<PaginatedResponse<AuditLog>, AppError> {
+    let mut filter = Document::new();
+    if let Some(event_type) = event_type.filter(|value| !value.trim().is_empty()) {
+        filter.insert("eventType", event_type.trim());
+    }
+    let mut created_at = Document::new();
+    if let Some(from) = from {
+        created_at.insert("$gte", mongodb::bson::DateTime::from_chrono(from));
+    }
+    if let Some(to) = to {
+        created_at.insert("$lte", mongodb::bson::DateTime::from_chrono(to));
+    }
+    if !created_at.is_empty() {
+        filter.insert("createdAt", created_at);
+    }
+    let logs = db.collection::<AuditLog>(AUDIT_LOGS);
+    let total = logs
+        .count_documents(filter.clone(), None)
+        .await
+        .map_err(database_error)?;
+    let mut cursor = logs
+        .find(
+            filter,
+            FindOptions::builder()
+                .sort(doc! { "createdAt": -1 })
+                .skip((page - 1).saturating_mul(per_page))
+                .limit(per_page as i64)
+                .build(),
+        )
+        .await
+        .map_err(database_error)?;
+    let mut data = Vec::new();
+    while cursor.advance().await.map_err(database_error)? {
+        data.push(cursor.deserialize_current().map_err(database_error)?);
+    }
     Ok(PaginatedResponse {
         data,
         total,

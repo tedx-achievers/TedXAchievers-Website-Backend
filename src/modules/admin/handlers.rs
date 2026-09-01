@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use chrono::{DateTime, Utc};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{errors::AppError, middleware::role::RequireAdmin, AppState};
 use axum::{
@@ -32,9 +32,20 @@ fn pagination_params(params: &HashMap<String, String>) -> Result<(u64, u64), App
 
 pub async fn dashboard_handler(
     State(state): State<Arc<AppState>>,
-    RequireAdmin(_): RequireAdmin,
+    RequireAdmin(user): RequireAdmin,
 ) -> Result<impl IntoResponse, AppError> {
     let stats = service::get_dashboard_stats(&state.db).await?;
+    let audit_db = state.db.clone();
+    let audit_email = user.email;
+    tokio::spawn(async move {
+        let _ = crate::utils::audit::log_event(
+            &audit_db,
+            "admin.viewed_dashboard",
+            Some(&audit_email),
+            serde_json::json!({"adminEmail": audit_email}),
+        )
+        .await;
+    });
     Ok((StatusCode::OK, Json(stats)))
 }
 
@@ -51,9 +62,20 @@ pub async fn list_attendees_handler(
 
 pub async fn export_attendees_handler(
     State(state): State<Arc<AppState>>,
-    RequireAdmin(_): RequireAdmin,
+    RequireAdmin(user): RequireAdmin,
 ) -> Result<Response, AppError> {
     let csv = service::export_attendees_csv(&state.db).await?;
+    let audit_db = state.db.clone();
+    let audit_email = user.email;
+    tokio::spawn(async move {
+        let _ = crate::utils::audit::log_event(
+            &audit_db,
+            "admin.exported_csv",
+            Some(&audit_email),
+            serde_json::json!({"adminEmail": audit_email}),
+        )
+        .await;
+    });
     let mut response = Response::new(csv.into_response().into_body());
     response
         .headers_mut()
@@ -63,6 +85,36 @@ pub async fn export_attendees_handler(
         HeaderValue::from_static("attachment; filename=\"attendees.csv\""),
     );
     Ok(response)
+}
+
+fn audit_date(value: Option<&String>, name: &str) -> Result<Option<DateTime<Utc>>, AppError> {
+    value
+        .map(|value| {
+            DateTime::parse_from_rfc3339(value)
+                .map(|date| date.with_timezone(&Utc))
+                .map_err(|_| AppError::BadRequest(format!("{name} must be an ISO date")))
+        })
+        .transpose()
+}
+
+pub async fn audit_logs_handler(
+    State(state): State<Arc<AppState>>,
+    RequireAdmin(_): RequireAdmin,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<impl IntoResponse, AppError> {
+    let (page, per_page) = pagination_params(&params)?;
+    let from = audit_date(params.get("from"), "from")?;
+    let to = audit_date(params.get("to"), "to")?;
+    let logs = service::get_audit_logs(
+        &state.db,
+        params.get("event_type").cloned(),
+        from,
+        to,
+        page,
+        per_page,
+    )
+    .await?;
+    Ok((StatusCode::OK, Json(logs)))
 }
 
 pub async fn list_volunteers_handler(

@@ -92,9 +92,13 @@ pub async fn connect_db(config: &Config) -> Database {
     let options = ClientOptions::parse(&config.mongodb_uri)
         .await
         .unwrap_or_else(|error| panic!("Failed to parse MongoDB URI: {error}"));
+    let database_name = options
+        .default_database
+        .clone()
+        .unwrap_or_else(|| "tedxachievers".to_owned());
     let client = Client::with_options(options)
         .unwrap_or_else(|error| panic!("Failed to create MongoDB client: {error}"));
-    let database = client.database("tedxachievers");
+    let database = client.database(&database_name);
     let unique = |field: &str| {
         IndexModel::builder()
             .keys(doc! { field: 1 })
@@ -162,6 +166,36 @@ pub async fn connect_db(config: &Config) -> Database {
                 normal("department"),
                 normal("preferredRole"),
                 normal("status"),
+            ],
+        ),
+        (
+            "audit_logs",
+            vec![
+                IndexModel::builder()
+                    .keys(doc! { "eventType": 1 })
+                    .options(
+                        IndexOptions::builder()
+                            .name("audit_event_type".to_owned())
+                            .build(),
+                    )
+                    .build(),
+                IndexModel::builder()
+                    .keys(doc! { "createdAt": -1 })
+                    .options(
+                        IndexOptions::builder()
+                            .name("audit_created_at".to_owned())
+                            .build(),
+                    )
+                    .build(),
+                IndexModel::builder()
+                    .keys(doc! { "createdAt": 1 })
+                    .options(
+                        IndexOptions::builder()
+                            .name("audit_created_at_ttl".to_owned())
+                            .expire_after(std::time::Duration::from_secs(7_776_000))
+                            .build(),
+                    )
+                    .build(),
             ],
         ),
     ];

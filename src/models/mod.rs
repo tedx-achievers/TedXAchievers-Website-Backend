@@ -1,3 +1,4 @@
+pub mod audit_log;
 pub mod event;
 pub mod refresh_token;
 pub mod ticket;

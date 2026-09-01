@@ -19,7 +19,7 @@ const GLOBAL_MAX_REQUESTS: usize = 120;
 const TICKET_WINDOW: Duration = Duration::from_secs(60);
 const TICKET_MAX_REQUESTS: usize = 62;
 const SENSITIVE_WINDOW: Duration = Duration::from_secs(12 * 60 * 60);
-const SENSITIVE_MAX_REQUESTS: usize = 5;
+const SENSITIVE_MAX_REQUESTS: usize = 15;
 
 fn ticket_scan_path(path: &str) -> bool {
     let mut segments = path.split('/');

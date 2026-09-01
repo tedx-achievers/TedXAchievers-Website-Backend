@@ -19,6 +19,7 @@ image = "0.24"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+serial_test = "3"
 dotenvy = "0.15"
 dashmap = "5"
 governor = "0.6"
@@ -33,3 +34,13 @@ anyhow = "1"
 printpdf = { version = "0.7", features = ["embedded_images"] }
 hmac = "0.12"
 sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[[bin]]
+name = "notify_volunteers"
+path = "src/bin/notify_volunteers.rs"

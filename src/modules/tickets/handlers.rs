@@ -59,11 +59,11 @@ pub async fn verify_ticket(
 }
 pub async fn checkin_ticket(
     State(state): State<Arc<AppState>>,
-    RequireVolunteer(_): RequireVolunteer,
+    RequireVolunteer(user): RequireVolunteer,
     Path(code): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(
-        serde_json::json!({"success":true,"data":service::checkin(&state.db,&code).await?}),
+        serde_json::json!({"success":true,"data":service::checkin(&state.db,&code,&user.email).await?}),
     ))
 }
 pub async fn webhook(

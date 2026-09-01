@@ -4,6 +4,7 @@ use mongodb::{
     options::{FindOneOptions, FindOptions},
     Database,
 };
+use serde_json::json;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -97,6 +98,23 @@ pub async fn apply(
         return Err(AppError::Internal(anyhow::anyhow!(error)));
     }
     info!(application_id = %application.id, "Volunteer application created");
+    let audit_db = db.clone();
+    let audit_email = application.email.clone();
+    let audit_name = application.full_name.clone();
+    let audit_role = format!("{:?}", application.preferred_role);
+    tokio::spawn(async move {
+        let _ = crate::utils::audit::log_event(
+            &audit_db,
+            "volunteer.applied",
+            Some(&audit_email),
+            json!({
+                "fullName": audit_name,
+                "email": audit_email,
+                "preferredRole": audit_role
+            }),
+        )
+        .await;
+    });
     Ok(application)
 }
 
@@ -212,6 +230,7 @@ pub async fn update_status(
     config: &Arc<Config>,
     application_id: &str,
     dto: UpdateApplicationStatusDto,
+    admin_email: &str,
 ) -> Result<VolunteerApplication, AppError> {
     let collection = db.collection::<VolunteerApplication>(COLLECTION);
     let application = collection
@@ -240,6 +259,22 @@ pub async fn update_status(
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?
         .ok_or_else(|| AppError::NotFound("Application not found".to_owned()))?;
+
+    let event_type = match &dto.status {
+        ApplicationStatus::Approved => Some("volunteer.approved"),
+        ApplicationStatus::Rejected => Some("volunteer.rejected"),
+        ApplicationStatus::Pending => None,
+    };
+    if let Some(event_type) = event_type {
+        let mut metadata = json!({
+            "applicantEmail": updated.email.clone(),
+            "adminEmail": admin_email
+        });
+        if event_type == "volunteer.rejected" {
+            metadata["previousStatus"] = json!(format!("{:?}", previous_status));
+        }
+        crate::utils::audit::log_event(db, event_type, Some(admin_email), metadata).await?;
+    }
 
     let preferred_role = match &updated.preferred_role {
         PreferredRole::Technical => "Technical",
