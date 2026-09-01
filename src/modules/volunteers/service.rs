@@ -135,12 +135,13 @@ pub async fn change_preferred_role(
     let updated_at = Utc::now();
     let result = collection
         .update_one(
-            doc! { "email": &email },
+            doc! { "email": &email, "roleChangeCount": { "$ne": 1_i64 } },
             doc! {
                 "$set": {
                     "preferredRole": preferred_role_value(&dto.preferred_role),
                     "updatedAt": mongodb::bson::DateTime::from_millis(updated_at.timestamp_millis())
-                }
+                },
+                "$inc": { "roleChangeCount": 1_i64 }
             },
             None,
         )
@@ -150,9 +151,20 @@ pub async fn change_preferred_role(
             AppError::Internal(anyhow::anyhow!(error))
         })?;
     if result.matched_count == 0 {
-        return Err(AppError::NotFound(
-            "No application found for this email".to_owned(),
-        ));
+        let exists = collection
+            .find_one(doc! { "email": &email }, None)
+            .await
+            .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?
+            .is_some();
+        return if exists {
+            Err(AppError::Conflict(
+                "The preferred role has already been changed for this email".to_owned(),
+            ))
+        } else {
+            Err(AppError::NotFound(
+                "No application found for this email".to_owned(),
+            ))
+        };
     }
     collection
         .find_one(doc! { "email": email }, None)
