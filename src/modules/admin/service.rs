@@ -1,4 +1,9 @@
-use std::fmt::Write;
+use std::{
+    collections::HashMap,
+    fmt::Write,
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
 use chrono::{DateTime, Utc};
 use mongodb::{
@@ -6,6 +11,7 @@ use mongodb::{
     options::FindOptions,
     Database,
 };
+use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::{
@@ -25,6 +31,9 @@ const USERS: &str = "users";
 const TICKETS: &str = "tickets";
 const VOLUNTEERS: &str = "volunteer_applications";
 const AUDIT_LOGS: &str = "audit_logs";
+const DASHBOARD_CACHE_TTL: Duration = Duration::from_secs(5);
+
+static DASHBOARD_CACHE: OnceLock<RwLock<Option<(Instant, DashboardStats)>>> = OnceLock::new();
 
 fn database_error(error: impl std::fmt::Display) -> AppError {
     AppError::Internal(anyhow::anyhow!(error.to_string()))
@@ -107,6 +116,27 @@ async fn aggregate_documents(
 }
 
 pub async fn get_dashboard_stats(db: &Database) -> Result<DashboardStats, AppError> {
+    let cache = DASHBOARD_CACHE.get_or_init(|| RwLock::new(None));
+    {
+        let cached = cache.read().await;
+        if let Some((created_at, stats)) = cached.as_ref() {
+            if created_at.elapsed() < DASHBOARD_CACHE_TTL {
+                return Ok(stats.clone());
+            }
+        }
+    }
+    let mut cached = cache.write().await;
+    if let Some((created_at, stats)) = cached.as_ref() {
+        if created_at.elapsed() < DASHBOARD_CACHE_TTL {
+            return Ok(stats.clone());
+        }
+    }
+    let stats = compute_dashboard_stats(db).await?;
+    *cached = Some((Instant::now(), stats.clone()));
+    Ok(stats)
+}
+
+async fn compute_dashboard_stats(db: &Database) -> Result<DashboardStats, AppError> {
     let users = db.collection::<mongodb::bson::Document>(USERS);
     let tickets = db.collection::<mongodb::bson::Document>(TICKETS);
     let volunteers = db.collection::<mongodb::bson::Document>(VOLUNTEERS);
@@ -292,16 +322,30 @@ pub async fn list_attendees(
         .map_err(database_error)?;
     let tickets = db.collection::<Ticket>(TICKETS);
     let mut data = Vec::new();
+    let mut page_users = Vec::new();
+    let mut user_ids = Vec::new();
     while cursor.advance().await.map_err(database_error)? {
         let user: User = cursor.deserialize_current().map_err(database_error)?;
-        let ticket = match user.id {
-            Some(user_id) => tickets
-                .find_one(doc! { "userId": user_id }, None)
-                .await
-                .map_err(database_error)?
-                .map(AdminTicketView::from),
-            None => None,
-        };
+        if let Some(user_id) = user.id {
+            user_ids.push(Bson::ObjectId(user_id));
+        }
+        page_users.push(user);
+    }
+    let mut tickets_by_user = HashMap::new();
+    if !user_ids.is_empty() {
+        let mut ticket_cursor = tickets
+            .find(doc! { "userId": { "$in": Bson::Array(user_ids) } }, None)
+            .await
+            .map_err(database_error)?;
+        while ticket_cursor.advance().await.map_err(database_error)? {
+            let ticket: Ticket = ticket_cursor
+                .deserialize_current()
+                .map_err(database_error)?;
+            tickets_by_user.insert(ticket.user_id, AdminTicketView::from(ticket));
+        }
+    }
+    for user in page_users {
+        let ticket = user.id.and_then(|user_id| tickets_by_user.remove(&user_id));
         data.push(AdminAttendeeView {
             user: AdminUserView::from(user),
             ticket,

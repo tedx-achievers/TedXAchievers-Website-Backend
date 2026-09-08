@@ -70,7 +70,7 @@ impl From<Ticket> for AdminTicketView {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardStats {
     pub total_registered: u64,
@@ -88,7 +88,7 @@ pub struct DashboardStats {
     pub checkin_rate: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TierRevenue {
     pub student: String,
@@ -96,7 +96,7 @@ pub struct TierRevenue {
     pub vip: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TierCount {
     pub student: u64,

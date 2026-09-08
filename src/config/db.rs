@@ -89,9 +89,13 @@ async fn migrate_and_verify_dates(database: &Database) {
 }
 
 pub async fn connect_db(config: &Config) -> Database {
-    let options = ClientOptions::parse(&config.mongodb_uri)
+    let mut options = ClientOptions::parse(&config.mongodb_uri)
         .await
         .unwrap_or_else(|error| panic!("Failed to parse MongoDB URI: {error}"));
+    options.min_pool_size = Some(5);
+    options.max_pool_size = Some(100);
+    options.connect_timeout = Some(std::time::Duration::from_secs(10));
+    options.server_selection_timeout = Some(std::time::Duration::from_secs(10));
     let database_name = options
         .default_database
         .clone()
@@ -143,6 +147,7 @@ pub async fn connect_db(config: &Config) -> Database {
             vec![
                 unique("email"),
                 unique_sparse_named("setPasswordToken", "user_set_password_token_unique"),
+                normal("createdAt"),
             ],
         ),
         (
@@ -152,6 +157,12 @@ pub async fn connect_db(config: &Config) -> Database {
                 unique("paymentRef"),
                 IndexModel::builder().keys(doc! { "userId": 1 }).build(),
                 normal("status"),
+                IndexModel::builder()
+                    .keys(doc! { "status": 1, "checkedIn": 1 })
+                    .build(),
+                IndexModel::builder()
+                    .keys(doc! { "tier": 1, "checkedIn": 1, "userId": 1 })
+                    .build(),
             ],
         ),
         (
@@ -166,6 +177,13 @@ pub async fn connect_db(config: &Config) -> Database {
                 normal("department"),
                 normal("preferredRole"),
                 normal("status"),
+                normal("createdAt"),
+                IndexModel::builder()
+                    .keys(doc! { "status": 1, "createdAt": -1 })
+                    .build(),
+                IndexModel::builder()
+                    .keys(doc! { "preferredRole": 1, "createdAt": -1 })
+                    .build(),
             ],
         ),
         (
@@ -195,6 +213,12 @@ pub async fn connect_db(config: &Config) -> Database {
                             .expire_after(std::time::Duration::from_secs(7_776_000))
                             .build(),
                     )
+                    .build(),
+                IndexModel::builder()
+                    .keys(doc! { "eventType": 1, "createdAt": -1 })
+                    .build(),
+                IndexModel::builder()
+                    .keys(doc! { "actor": 1, "createdAt": -1 })
                     .build(),
             ],
         ),
