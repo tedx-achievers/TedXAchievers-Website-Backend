@@ -15,9 +15,11 @@ use std::net::SocketAddr;
 use crate::AppState;
 
 const GLOBAL_WINDOW: Duration = Duration::from_secs(15 * 60);
-const GLOBAL_MAX_REQUESTS: usize = 120;
+const GLOBAL_MAX_REQUESTS: usize = 500;
 const TICKET_WINDOW: Duration = Duration::from_secs(60);
-const TICKET_MAX_REQUESTS: usize = 62;
+const TICKET_MAX_REQUESTS: usize = 300;
+const VOLUNTEER_ME_WINDOW: Duration = Duration::from_secs(60);
+const VOLUNTEER_ME_MAX_REQUESTS: usize = 120;
 const SENSITIVE_WINDOW: Duration = Duration::from_secs(12 * 60 * 60);
 const SENSITIVE_MAX_REQUESTS: usize = 30;
 
@@ -42,6 +44,10 @@ fn sensitive_auth_path(path: &str) -> bool {
             | "/api/auth/forgot-password"
             | "/api/auth/reset-password"
     )
+}
+
+fn volunteer_me_path(path: &str) -> bool {
+    path == "/api/volunteers/me"
 }
 
 pub async fn request_rate_limit(
@@ -80,6 +86,12 @@ pub async fn request_rate_limit(
             format!("ticket-scan:{path}"),
             TICKET_WINDOW,
             TICKET_MAX_REQUESTS,
+        )
+    } else if volunteer_me_path(path) {
+        (
+            "volunteer-me".to_owned(),
+            VOLUNTEER_ME_WINDOW,
+            VOLUNTEER_ME_MAX_REQUESTS,
         )
     } else if sensitive_auth_path(path) {
         (
