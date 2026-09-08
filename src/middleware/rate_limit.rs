@@ -10,18 +10,28 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use axum_extra::extract::cookie::CookieJar;
+use base64::{engine::general_purpose, Engine as _};
 use std::net::SocketAddr;
 
 use crate::AppState;
 
-const GLOBAL_WINDOW: Duration = Duration::from_secs(15 * 60);
-const GLOBAL_MAX_REQUESTS: usize = 500;
+const PUBLIC_WINDOW: Duration = Duration::from_secs(15 * 60);
+const PUBLIC_MAX_REQUESTS: usize = 2_000;
+const USER_WINDOW: Duration = Duration::from_secs(15 * 60);
+const USER_MAX_REQUESTS: usize = 200;
 const TICKET_WINDOW: Duration = Duration::from_secs(60);
 const TICKET_MAX_REQUESTS: usize = 300;
-const VOLUNTEER_ME_WINDOW: Duration = Duration::from_secs(60);
-const VOLUNTEER_ME_MAX_REQUESTS: usize = 120;
+const ADMIN_MAX_REQUESTS: usize = 300;
+const PROFILE_MAX_REQUESTS: usize = 20;
+const TICKET_INITIATE_MAX_REQUESTS: usize = 10;
+const TICKET_VERIFY_OTP_MAX_REQUESTS: usize = 10;
+const VOLUNTEER_APPLY_MAX_REQUESTS: usize = 5;
+const VOLUNTEER_ME_MAX_REQUESTS: usize = 100;
+const VOLUNTEER_CHANGE_ROLE_MAX_REQUESTS: usize = 3;
+const AUTH_REFRESH_MAX_REQUESTS: usize = 50;
 const SENSITIVE_WINDOW: Duration = Duration::from_secs(12 * 60 * 60);
-const SENSITIVE_MAX_REQUESTS: usize = 30;
+const SENSITIVE_MAX_REQUESTS: usize = 15;
 
 fn ticket_scan_path(path: &str) -> bool {
     let mut segments = path.split('/');
@@ -39,6 +49,7 @@ fn sensitive_auth_path(path: &str) -> bool {
     matches!(
         path,
         "/api/auth/login"
+            | "/api/auth/register"
             | "/api/auth/verify-email"
             | "/api/auth/resend-verification"
             | "/api/auth/forgot-password"
@@ -48,6 +59,38 @@ fn sensitive_auth_path(path: &str) -> bool {
 
 fn volunteer_me_path(path: &str) -> bool {
     path == "/api/volunteers/me"
+}
+
+fn dashboard_path(path: &str) -> bool {
+    path == "/api/dashboard" || path.starts_with("/api/dashboard/")
+}
+
+fn admin_path(path: &str) -> bool {
+    path == "/api/admin" || path.starts_with("/api/admin/")
+}
+
+fn webhook_path(path: &str) -> bool {
+    path == "/api/tickets/webhook"
+}
+
+fn health_path(path: &str) -> bool {
+    path == "/api/health"
+}
+
+fn authenticated_user_id(request: &Request<Body>) -> Option<String> {
+    let jar = CookieJar::from_headers(request.headers());
+    let token = jar.get("access_token").map(|cookie| cookie.value())?;
+    let payload = token.split('.').nth(1)?;
+    let decoded = general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .or_else(|_| general_purpose::URL_SAFE.decode(payload))
+        .ok()?;
+    serde_json::from_slice::<serde_json::Value>(&decoded)
+        .ok()?
+        .get("sub")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 pub async fn request_rate_limit(
@@ -81,28 +124,98 @@ pub async fn request_rate_limit(
         })
         .unwrap_or_else(|| "unknown".to_owned());
     let path = request.uri().path();
-    let (bucket, window, max_requests) = if ticket_scan_path(path) {
-        (
-            format!("ticket-scan:{path}"),
-            TICKET_WINDOW,
-            TICKET_MAX_REQUESTS,
-        )
-    } else if volunteer_me_path(path) {
-        (
-            "volunteer-me".to_owned(),
-            VOLUNTEER_ME_WINDOW,
-            VOLUNTEER_ME_MAX_REQUESTS,
-        )
+    let method = request.method();
+    let (bucket, window, max_requests, user_based) = if health_path(path) || webhook_path(path) {
+        return next.run(request).await;
     } else if sensitive_auth_path(path) {
         (
             format!("sensitive-auth:{path}"),
             SENSITIVE_WINDOW,
             SENSITIVE_MAX_REQUESTS,
+            false,
         )
+    } else if method == Method::POST && path == "/api/auth/refresh" {
+        (
+            "auth-refresh".to_owned(),
+            PUBLIC_WINDOW,
+            AUTH_REFRESH_MAX_REQUESTS,
+            false,
+        )
+    } else if method == Method::POST && path == "/api/tickets/initiate" {
+        (
+            "ticket-initiate".to_owned(),
+            PUBLIC_WINDOW,
+            TICKET_INITIATE_MAX_REQUESTS,
+            false,
+        )
+    } else if method == Method::POST && path == "/api/tickets/verify-otp" {
+        (
+            "ticket-verify-otp".to_owned(),
+            PUBLIC_WINDOW,
+            TICKET_VERIFY_OTP_MAX_REQUESTS,
+            false,
+        )
+    } else if method == Method::POST && path == "/api/volunteers/apply" {
+        (
+            "volunteer-apply".to_owned(),
+            PUBLIC_WINDOW,
+            VOLUNTEER_APPLY_MAX_REQUESTS,
+            false,
+        )
+    } else if method == Method::GET && volunteer_me_path(path) {
+        (
+            "volunteer-me".to_owned(),
+            PUBLIC_WINDOW,
+            VOLUNTEER_ME_MAX_REQUESTS,
+            false,
+        )
+    } else if method == Method::PATCH && path == "/api/volunteers/change-role" {
+        (
+            "volunteer-change-role".to_owned(),
+            PUBLIC_WINDOW,
+            VOLUNTEER_CHANGE_ROLE_MAX_REQUESTS,
+            false,
+        )
+    } else if method == Method::PATCH && path == "/api/dashboard/profile" {
+        (
+            "dashboard-profile".to_owned(),
+            USER_WINDOW,
+            PROFILE_MAX_REQUESTS,
+            true,
+        )
+    } else if ticket_scan_path(path) {
+        (
+            "ticket-scan".to_owned(),
+            TICKET_WINDOW,
+            TICKET_MAX_REQUESTS,
+            true,
+        )
+    } else if path == "/api/tickets/mine" {
+        (
+            "ticket-mine".to_owned(),
+            USER_WINDOW,
+            USER_MAX_REQUESTS,
+            true,
+        )
+    } else if admin_path(path) {
+        ("admin".to_owned(), USER_WINDOW, ADMIN_MAX_REQUESTS, true)
+    } else if dashboard_path(path) {
+        ("dashboard".to_owned(), USER_WINDOW, USER_MAX_REQUESTS, true)
     } else {
-        ("global".to_owned(), GLOBAL_WINDOW, GLOBAL_MAX_REQUESTS)
+        (
+            "public".to_owned(),
+            PUBLIC_WINDOW,
+            PUBLIC_MAX_REQUESTS,
+            false,
+        )
     };
-    let key = format!("{bucket}:{ip}");
+    let key = if user_based {
+        authenticated_user_id(&request)
+            .map(|user_id| format!("user:{bucket}:{user_id}"))
+            .unwrap_or_else(|| format!("ip:{bucket}:{ip}"))
+    } else {
+        format!("ip:{bucket}:{ip}")
+    };
     let now = Instant::now();
     let limited = {
         let mut timestamps = state.rate_limits.entry(key).or_default();
