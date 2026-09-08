@@ -16,6 +16,9 @@ use std::net::SocketAddr;
 
 use crate::AppState;
 
+// Temporary production-load-test switch. Set to true to restore rate limiting.
+const RATE_LIMITING_ENABLED: bool = false;
+
 const PUBLIC_WINDOW: Duration = Duration::from_secs(15 * 60);
 const PUBLIC_MAX_REQUESTS: usize = 2_000;
 const USER_WINDOW: Duration = Duration::from_secs(15 * 60);
@@ -98,6 +101,10 @@ pub async fn request_rate_limit(
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    if !RATE_LIMITING_ENABLED {
+        return next.run(request).await;
+    }
+
     if request.method() == Method::OPTIONS {
         return next.run(request).await;
     }
