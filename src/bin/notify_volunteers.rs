@@ -84,10 +84,17 @@ async fn main() -> Result<(), AppError> {
     let _ = dotenvy::dotenv();
     let config = Arc::new(Config::from_env());
     let db = connect_db(&config).await;
+    let recipient = std::env::args()
+        .nth(1)
+        .map(|email| email.trim().to_lowercase());
+    let filter = recipient
+        .as_deref()
+        .map(|email| doc! { "email": email })
+        .unwrap_or_else(|| doc! {});
     let mut cursor = db
         .collection::<VolunteerApplication>("volunteer_applications")
         .find(
-            doc! {},
+            filter,
             FindOptions::builder()
                 .sort(doc! { "createdAt": 1 })
                 .limit(44)
@@ -108,9 +115,10 @@ async fn main() -> Result<(), AppError> {
         );
     }
     if applications.is_empty() {
-        return Err(AppError::NotFound(
-            "No volunteer applications were found".to_owned(),
-        ));
+        return Err(AppError::NotFound(match recipient {
+            Some(email) => format!("No volunteer application was found for {email}"),
+            None => "No volunteer applications were found".to_owned(),
+        }));
     }
     if TEST_MODE {
         println!("TEST MODE: sending to TEST_EMAIL only");

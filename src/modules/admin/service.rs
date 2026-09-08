@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use chrono::{DateTime, Utc};
 use mongodb::{
-    bson::{doc, Document, Regex},
+    bson::{doc, Bson, Document, Regex},
     options::FindOptions,
     Database,
 };
@@ -231,9 +231,12 @@ pub async fn list_attendees(
     page: u64,
     per_page: u64,
     search: Option<String>,
+    tier: Option<String>,
+    checked_in: Option<bool>,
+    is_verified: Option<bool>,
 ) -> Result<PaginatedResponse<AdminAttendeeView>, AppError> {
     let users = db.collection::<User>(USERS);
-    let filter = search
+    let mut filter = search
         .filter(|value| !value.trim().is_empty())
         .map(|value| {
             let regex = Regex {
@@ -246,6 +249,32 @@ pub async fn list_attendees(
             ] }
         })
         .unwrap_or_default();
+    if let Some(is_verified) = is_verified {
+        filter.insert("isVerified", is_verified);
+    }
+    let tier = tier.filter(|value| !value.trim().is_empty());
+    if tier.is_some() || checked_in.is_some() {
+        let mut ticket_filter = Document::new();
+        if let Some(tier) = tier {
+            ticket_filter.insert("tier", tier.trim().to_lowercase());
+        }
+        if let Some(checked_in) = checked_in {
+            ticket_filter.insert("checkedIn", checked_in);
+        }
+        let tickets = db.collection::<Ticket>(TICKETS);
+        let mut ticket_cursor = tickets
+            .find(ticket_filter, None)
+            .await
+            .map_err(database_error)?;
+        let mut user_ids = Vec::new();
+        while ticket_cursor.advance().await.map_err(database_error)? {
+            let ticket: Ticket = ticket_cursor
+                .deserialize_current()
+                .map_err(database_error)?;
+            user_ids.push(Bson::ObjectId(ticket.user_id));
+        }
+        filter.insert("_id", doc! { "$in": Bson::Array(user_ids) });
+    }
     let total = users
         .count_documents(filter.clone(), None)
         .await
@@ -356,14 +385,32 @@ pub async fn export_attendees_csv(db: &Database) -> Result<String, AppError> {
 pub async fn list_volunteers(
     db: &Database,
     status_filter: Option<String>,
+    preferred_role: Option<String>,
+    search: Option<String>,
     page: u64,
     per_page: u64,
 ) -> Result<PaginatedResponse<VolunteerApplication>, AppError> {
     let volunteers = db.collection::<VolunteerApplication>(VOLUNTEERS);
-    let filter = status_filter
-        .filter(|value| !value.trim().is_empty())
-        .map(|status| doc! { "status": status.trim().to_lowercase() })
-        .unwrap_or_default();
+    let mut filter = Document::new();
+    if let Some(status) = status_filter.filter(|value| !value.trim().is_empty()) {
+        filter.insert("status", status.trim().to_lowercase());
+    }
+    if let Some(preferred_role) = preferred_role.filter(|value| !value.trim().is_empty()) {
+        filter.insert("preferredRole", preferred_role.trim().to_lowercase());
+    }
+    if let Some(search) = search.filter(|value| !value.trim().is_empty()) {
+        let regex = Regex {
+            pattern: escape_regex(search.trim()),
+            options: "i".to_owned(),
+        };
+        filter.insert(
+            "$or",
+            Bson::Array(vec![
+                doc! { "fullName": regex.clone() }.into(),
+                doc! { "email": regex }.into(),
+            ]),
+        );
+    }
     let total = volunteers
         .count_documents(filter.clone(), None)
         .await
@@ -396,6 +443,7 @@ pub async fn list_volunteers(
 pub async fn get_audit_logs(
     db: &Database,
     event_type: Option<String>,
+    actor: Option<String>,
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
     page: u64,
@@ -404,6 +452,15 @@ pub async fn get_audit_logs(
     let mut filter = Document::new();
     if let Some(event_type) = event_type.filter(|value| !value.trim().is_empty()) {
         filter.insert("eventType", event_type.trim());
+    }
+    if let Some(actor) = actor.filter(|value| !value.trim().is_empty()) {
+        filter.insert(
+            "actor",
+            Regex {
+                pattern: escape_regex(actor.trim()),
+                options: "i".to_owned(),
+            },
+        );
     }
     let mut created_at = Document::new();
     if let Some(from) = from {

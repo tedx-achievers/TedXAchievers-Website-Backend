@@ -55,8 +55,32 @@ pub async fn list_attendees_handler(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, AppError> {
     let (page, per_page) = pagination_params(&params)?;
-    let attendees =
-        service::list_attendees(&state.db, page, per_page, params.get("search").cloned()).await?;
+    let checked_in = params
+        .get("checked_in")
+        .map(|value| {
+            value
+                .parse::<bool>()
+                .map_err(|_| AppError::BadRequest("checked_in must be true or false".to_owned()))
+        })
+        .transpose()?;
+    let is_verified = params
+        .get("is_verified")
+        .map(|value| {
+            value
+                .parse::<bool>()
+                .map_err(|_| AppError::BadRequest("is_verified must be true or false".to_owned()))
+        })
+        .transpose()?;
+    let attendees = service::list_attendees(
+        &state.db,
+        page,
+        per_page,
+        params.get("search").cloned(),
+        params.get("tier").cloned(),
+        checked_in,
+        is_verified,
+    )
+    .await?;
     Ok((StatusCode::OK, Json(attendees)))
 }
 
@@ -108,6 +132,7 @@ pub async fn audit_logs_handler(
     let logs = service::get_audit_logs(
         &state.db,
         params.get("event_type").cloned(),
+        params.get("actor").cloned(),
         from,
         to,
         page,
@@ -123,7 +148,14 @@ pub async fn list_volunteers_handler(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, AppError> {
     let (page, per_page) = pagination_params(&params)?;
-    let volunteers =
-        service::list_volunteers(&state.db, params.get("status").cloned(), page, per_page).await?;
+    let volunteers = service::list_volunteers(
+        &state.db,
+        params.get("status").cloned(),
+        params.get("preferred_role").cloned(),
+        params.get("search").cloned(),
+        page,
+        per_page,
+    )
+    .await?;
     Ok((StatusCode::OK, Json(volunteers)))
 }

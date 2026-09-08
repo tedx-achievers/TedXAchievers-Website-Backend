@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use mongodb::{
-    bson::doc,
+    bson::{doc, Document, Regex},
     options::{FindOneOptions, FindOptions},
     Database,
 };
@@ -198,11 +198,26 @@ pub async fn change_preferred_role(
 pub async fn list_applications(
     db: &Database,
     status_filter: Option<ApplicationStatus>,
+    preferred_role: Option<String>,
+    search: Option<String>,
 ) -> Result<Vec<VolunteerApplication>, AppError> {
-    let filter = status_filter
-        .as_ref()
-        .map(|status| doc! { "status": status_value(status) })
-        .unwrap_or_default();
+    let mut filter = Document::new();
+    if let Some(status) = status_filter.as_ref() {
+        filter.insert("status", status_value(status));
+    }
+    if let Some(preferred_role) = preferred_role.filter(|value| !value.trim().is_empty()) {
+        filter.insert("preferredRole", preferred_role.trim().to_lowercase());
+    }
+    if let Some(search) = search.filter(|value| !value.trim().is_empty()) {
+        let regex = Regex {
+            pattern: regex_escape(search.trim()),
+            options: "i".to_owned(),
+        };
+        filter.insert(
+            "$or",
+            vec![doc! { "fullName": regex.clone() }, doc! { "email": regex }],
+        );
+    }
     let mut cursor = db
         .collection::<VolunteerApplication>(COLLECTION)
         .find(
@@ -227,6 +242,20 @@ pub async fn list_applications(
         );
     }
     Ok(applications)
+}
+
+fn regex_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(
+            character,
+            '\\' | '.' | '+' | '*' | '?' | '^' | '$' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
 }
 
 pub async fn update_status(

@@ -141,7 +141,13 @@ pub async fn admin_list_handler(
             _ => Err(AppError::BadRequest("Invalid status filter".to_owned())),
         })
         .transpose()?;
-    let applications = service::list_applications(&state.db, status_filter).await?;
+    let applications = service::list_applications(
+        &state.db,
+        status_filter,
+        params.get("preferred_role").cloned(),
+        params.get("search").cloned(),
+    )
+    .await?;
     Ok((StatusCode::OK, Json(applications)).into_response())
 }
 
